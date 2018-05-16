@@ -3423,11 +3423,11 @@ xtrabackup_init_datasinks(void)
 			ds = ds_create(xtrabackup_target_dir, DS_TYPE_ENCRYPT);
 			xtrabackup_add_datasink(ds);
 
-			ds_set_pipe(ds, ds_meta);
-			ds_redo = ds_meta = ds;
-		} else {
-			ds_redo = ds_data = ds_meta = ds;
-		}
+                        ds_set_pipe(ds, ds_redo);
+                        ds_redo = ds;
+                } else {
+                  ds_redo = ds_data = ds;
+                }
 	}
 
 	/* Compression for ds_data and ds_redo */
