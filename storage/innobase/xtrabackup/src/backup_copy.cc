@@ -1504,7 +1504,7 @@ bool copy_back(int argc, char **argv) {
     ut_a(ret == 1);
     fclose(f);
 
-    if (!xb_keyring_init_for_prepare(argc, argv)) {
+    if (!xb_keyring_init_for_copy_back(argc, argv)) {
       msg("xtrabackup: Error: failed to init "
           "keyring plugin\n");
       return (false);
