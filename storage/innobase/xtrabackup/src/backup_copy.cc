@@ -1663,12 +1663,12 @@ copy_back(int argc, char **argv)
 		ut_a(ret == 1);
 		fclose(f);
 
-		if (!xb_keyring_init_for_prepare(argc, argv)) {
-			msg("xtrabackup: Error: failed to init "
-			    "keyring plugin\n");
-			return(false);
-		}
-		if (!xb_tablespace_keys_load(
+                if (!xb_keyring_init_for_copy_back(argc, argv)) {
+                  msg("xtrabackup: Error: failed to init "
+                      "keyring plugin\n");
+                  return (false);
+                }
+                if (!xb_tablespace_keys_load(
 		    "./",
 		    opt_transition_key,
 		    opt_transition_key != NULL ?
