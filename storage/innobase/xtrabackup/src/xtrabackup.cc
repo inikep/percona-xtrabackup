@@ -369,6 +369,7 @@ bool innodb_checksum_algorithm_specified = false;
 /* String buffer used by --print-param to accumulate server options as they are
 parsed from the defaults file */
 static std::ostringstream print_param_str;
+static std::ostringstream param_str;
 
 /* Set of specified parameters */
 std::set<std::string> param_set;
@@ -1514,9 +1515,25 @@ bool check_if_param_set(const char *param) {
   return param_set.find(param) != param_set.end();
 }
 
-bool xb_get_one_option(int optid,
-                       const struct my_option *opt __attribute__((unused)),
-                       char *argument) {
+bool xb_get_one_option(int optid, const struct my_option *opt, char *argument) {
+  static const char *hide_value[] = {"password", "encrypt-key",
+                                     "transition-key"};
+
+  param_str << "--" << opt->name;
+  if (argument) {
+    bool param_handled = false;
+    for (unsigned i = 0; i < sizeof(hide_value) / sizeof(char *); ++i) {
+      if (strcmp(opt->name, hide_value[i]) == 0) {
+        param_handled = true;
+        param_str << "=*";
+        break;
+      }
+    }
+    if (!param_handled) {
+      param_str << "=" << argument;
+    }
+  }
+  param_str << " ";
   switch (optid) {
     case '#':
       dbug_setting = argument ? argument : "d,ib_log";
@@ -6382,6 +6399,9 @@ void handle_options(int argc, char **argv, int *argc_client,
                                  xb_get_one_option)))
     exit(ho_error);
 
+  msg("xtrabackup: recognized server arguments: %s\n", param_str.str().c_str());
+  param_str.clear();
+
   if (load_defaults(conf_file, xb_client_default_groups, argc_client,
                     argv_client, &argv_alloc)) {
     exit(EXIT_FAILURE);
@@ -6391,6 +6411,9 @@ void handle_options(int argc, char **argv, int *argc_client,
       (ho_error = handle_options(argc_client, argv_client, xb_client_options,
                                  xb_get_one_option)))
     exit(ho_error);
+
+  msg("xtrabackup: recognized client arguments: %s\n", param_str.str().c_str());
+  param_str.clear();
 
   /* Reject command line arguments that don't look like options, i.e. are
   not of the form '-X' (single-character options) or '--option' (long
