@@ -464,8 +464,9 @@ extract_worker_thread_func(void *arg)
 					       chunk.path,
 					       chunk.pathlen);
 			if (entry == NULL) {
-				pthread_mutex_unlock(ctxt->mutex);
-				break;
+                          res = XB_STREAM_READ_ERROR;
+                          pthread_mutex_unlock(ctxt->mutex);
+                          break;
 			}
 			ctxt->filehash[chunk.path] = entry;
 		}
