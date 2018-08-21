@@ -2130,13 +2130,11 @@ dberr_t dict_load_tables_from_space_id(space_id_t space_id, THD *thd,
     ut_a(space != nullptr);
 
     bool implicit = fsp_is_file_per_table(space_id, space->flags);
-    if (dd_table_open_on_dd_obj(dc, space_id, *dd_table.get(), ib_table, thd,
+    if (dd_table_load_on_dd_obj(dc, space_id, *dd_table.get(), ib_table, thd,
                                 &schema_name, implicit) != 0) {
       err = DB_ERROR;
       goto error;
     }
-
-    dd_table_close(ib_table, thd, nullptr, false);
   }
 
   return (DB_SUCCESS);
@@ -3866,6 +3864,262 @@ void xtrabackup_backup_func(void) {
   cleanup_mysql_environment();
 }
 
+/* ================= stats ================= */
+static bool xtrabackup_stats_level(dict_index_t *index, ulint level) {
+  ulint space;
+  page_t *page;
+
+  rec_t *node_ptr;
+
+  ulint right_page_no;
+
+  page_cur_t cursor;
+
+  mtr_t mtr;
+  mem_heap_t *heap = mem_heap_create(256, UT_LOCATION_HERE);
+
+  ulint *offsets = NULL;
+
+  ulonglong n_pages, n_pages_extern;
+  ulonglong sum_data, sum_data_extern;
+  ulonglong n_recs;
+  buf_block_t *block;
+  page_size_t page_size(0, 0, false);
+  bool found;
+
+  n_pages = sum_data = n_recs = 0;
+  n_pages_extern = sum_data_extern = 0;
+
+  if (level == 0)
+    fprintf(stdout, "        leaf pages: ");
+  else
+    fprintf(stdout, "     level %lu pages: ", level);
+
+  mtr_start(&mtr);
+
+  mtr_x_lock(&(index->lock), &mtr, UT_LOCATION_HERE);
+  block = btr_root_block_get(index, RW_X_LATCH, &mtr);
+  page = buf_block_get_frame(block);
+
+  space = page_get_space_id(page);
+  page_size.copy_from(fil_space_get_page_size(space, &found));
+
+  ut_a(found);
+
+  while (level != btr_page_get_level(page)) {
+    ut_a(space == block->page.id.space());
+    ut_a(space == page_get_space_id(page));
+    ut_a(!page_is_leaf(page));
+
+    page_cur_set_before_first(block, &cursor);
+    page_cur_move_to_next(&cursor);
+
+    node_ptr = page_cur_get_rec(&cursor);
+    offsets = rec_get_offsets(node_ptr, index, offsets, ULINT_UNDEFINED,
+                              UT_LOCATION_HERE, &heap);
+    block = btr_node_ptr_get_child(node_ptr, index, offsets, &mtr);
+    page = buf_block_get_frame(block);
+  }
+
+loop:
+  mem_heap_empty(heap);
+  offsets = NULL;
+  mtr_x_lock(&(index->lock), &mtr, UT_LOCATION_HERE);
+
+  right_page_no = btr_page_get_next(page, &mtr);
+
+  n_pages++;
+  sum_data += page_get_data_size(page);
+  n_recs += page_get_n_recs(page);
+
+  if (level == 0) {
+    page_cur_t cur;
+    ulint n_fields;
+    ulint i;
+    mem_heap_t *local_heap = NULL;
+    ulint offsets_[REC_OFFS_NORMAL_SIZE];
+    ulint *local_offsets = offsets_;
+
+    *offsets_ = (sizeof offsets_) / sizeof *offsets_;
+
+    page_cur_set_before_first(block, &cur);
+    page_cur_move_to_next(&cur);
+
+    for (;;) {
+      if (page_cur_is_after_last(&cur)) {
+        break;
+      }
+
+      local_offsets =
+          rec_get_offsets(cur.rec, index, local_offsets, ULINT_UNDEFINED,
+                          UT_LOCATION_HERE, &local_heap);
+      n_fields = rec_offs_n_fields(local_offsets);
+
+      for (i = 0; i < n_fields; i++) {
+        if (rec_offs_nth_extern(nullptr, local_offsets, i)) {
+          page_t *local_page;
+          ulint space_id;
+          ulint page_no;
+          ulint offset;
+          byte *blob_header;
+          ulint part_len;
+          mtr_t local_mtr;
+          ulint local_len;
+          byte *data;
+          buf_block_t *local_block;
+
+          data =
+
+              rec_get_nth_field(nullptr, cur.rec, local_offsets, i, &local_len);
+
+          ut_a(local_len >= BTR_EXTERN_FIELD_REF_SIZE);
+          local_len -= BTR_EXTERN_FIELD_REF_SIZE;
+
+          space_id =
+              mach_read_from_4(data + local_len + lob::BTR_EXTERN_SPACE_ID);
+          page_no =
+              mach_read_from_4(data + local_len + lob::BTR_EXTERN_PAGE_NO);
+          offset = mach_read_from_4(data + local_len + lob::BTR_EXTERN_OFFSET);
+
+          if (offset == 1) {
+            // see lob0impl.cc::insert
+            part_len =
+                mach_read_from_4(data + local_len + lob::BTR_EXTERN_LEN + 4);
+            sum_data_extern += part_len;
+            continue;
+          }
+
+          for (;;) {
+            mtr_start(&local_mtr);
+
+            local_block =
+                btr_block_get(page_id_t(space_id, page_no), page_size,
+                              RW_S_LATCH, UT_LOCATION_HERE, index, &local_mtr);
+            local_page = buf_block_get_frame(local_block);
+            blob_header = local_page + offset;
+#define BTR_BLOB_HDR_PART_LEN 0
+#define BTR_BLOB_HDR_NEXT_PAGE_NO 4
+            // part_len = btr_blob_get_part_len(blob_header);
+            part_len = mach_read_from_4(blob_header + BTR_BLOB_HDR_PART_LEN);
+
+            // page_no = btr_blob_get_next_page_no(blob_header);
+            page_no = mach_read_from_4(blob_header + BTR_BLOB_HDR_NEXT_PAGE_NO);
+
+            offset = FIL_PAGE_DATA;
+
+            /*=================================*/
+            // fprintf(stdout, "[%lu] ", (ulint) buf_frame_get_page_no(page));
+
+            n_pages_extern++;
+            sum_data_extern += part_len;
+
+            mtr_commit(&local_mtr);
+
+            if (page_no == FIL_NULL) break;
+          }
+        }
+      }
+
+      page_cur_move_to_next(&cur);
+    }
+  }
+
+  mtr_commit(&mtr);
+  if (right_page_no != FIL_NULL) {
+    mtr_start(&mtr);
+    block = btr_block_get(page_id_t(space, dict_index_get_page(index)),
+                          page_size, RW_X_LATCH, UT_LOCATION_HERE, index, &mtr);
+    page = buf_block_get_frame(block);
+    goto loop;
+  }
+  mem_heap_free(heap);
+
+  if (level == 0) fprintf(stdout, "recs=%llu, ", n_recs);
+
+  fprintf(stdout, "pages=%llu, data=%llu bytes, data/pages=%lld%%", n_pages,
+          sum_data, ((sum_data * 100) / page_size.physical()) / n_pages);
+
+  if (level == 0 && n_pages_extern) {
+    putc('\n', stdout);
+    /* also scan blob pages*/
+    fprintf(stdout, "    external pages: ");
+
+    fprintf(stdout, "pages=%llu, data=%llu bytes, data/pages=%lld%%",
+            n_pages_extern, sum_data_extern,
+            ((sum_data_extern * 100) / page_size.physical()) / n_pages_extern);
+  }
+
+  putc('\n', stdout);
+
+  if (level > 0) {
+    xtrabackup_stats_level(index, level - 1);
+  }
+
+  return (true);
+}
+
+static void stat_with_rec(dict_table_t *table, THD *thd,
+                          MDL_ticket *mdl_on_tab) {
+  mutex_exit(&(dict_sys->mutex));
+  if (table != nullptr) {
+    if (!check_if_skip_table(table->name.m_name)) {
+      dict_index_t *index;
+      if (table->first_index()) {
+        dict_stats_update_transient(table);
+      }
+
+      index = UT_LIST_GET_FIRST(table->indexes);
+      while (index != NULL) {
+        uint64_t n_vals;
+        bool found;
+
+        if (index->n_user_defined_cols > 0) {
+          n_vals = index->stat_n_diff_key_vals[index->n_user_defined_cols];
+        } else {
+          n_vals = index->stat_n_diff_key_vals[1];
+        }
+
+        fprintf(
+            stdout,
+            "	table: %s, index: %s, space id: %lu, root page: %lu"
+            ", zip size: %lu"
+            "\n	estimated statistics in dictionary:\n"
+            "		key vals: %lu, leaf pages: %lu, size pages: %lu\n"
+            "	real statistics:\n",
+            table->name.m_name, index->name(), (ulong)index->space,
+            (ulong)index->page,
+            (ulong)fil_space_get_page_size(index->space, &found).physical(),
+            (ulong)n_vals, (ulong)index->stat_n_leaf_pages,
+            (ulong)index->stat_index_size);
+
+        {
+          mtr_t local_mtr;
+          page_t *root;
+          ulint page_level;
+
+          mtr_start(&local_mtr);
+
+          mtr_x_lock(&(index->lock), &local_mtr, UT_LOCATION_HERE);
+
+          root = btr_root_get(index, &local_mtr);
+          page_level = btr_page_get_level(root);
+
+          xtrabackup_stats_level(index, page_level);
+
+          mtr_commit(&local_mtr);
+        }
+
+        putc('\n', stdout);
+        index = UT_LIST_GET_NEXT(indexes, index);
+      }
+    }
+  }
+  mutex_enter(&(dict_sys->mutex));
+  if (table != nullptr) {
+    dd_table_close(table, thd, &mdl_on_tab, true);
+  }
+}
+
 static void xtrabackup_stats_func(int argc, char **argv) {
   /* cd to datadir */
 
@@ -3962,20 +4216,43 @@ static void xtrabackup_stats_func(int argc, char **argv) {
       MDL_ticket *mdl_on_tab = nullptr;
       dd_process_dd_tables_rec_and_mtr_commit(heap, rec, &table, sys_tables,
                                               &mdl_on_tab, &mtr);
-      mutex_exit(&(dict_sys->mutex));
+
+      stat_with_rec(table, thd, mdl_on_tab);
 
       mem_heap_empty(heap);
-      mutex_enter(&(dict_sys->mutex));
-      if (table != nullptr) {
-        dd_table_close(table, thd, &mdl_on_tab, true);
-      }
+
       mtr_start(&mtr);
+
       rec = (rec_t *)dd_getnext_system_rec(&pcur, &mtr);
     }
 
     mtr_commit(&mtr);
     dd_table_close(sys_tables, thd, &mdl, true);
     mem_heap_empty(heap);
+
+    mtr_start(&mtr);
+
+    rec = dd_startscan_system(thd, &mdl, &pcur, &mtr, "mysql/table_partitions",
+                              &sys_tables);
+
+    while (rec) {
+      MDL_ticket *mdl_on_tab = nullptr;
+      dd_process_dd_partitions_rec_and_mtr_commit(heap, rec, &table, sys_tables,
+                                                  &mdl_on_tab, &mtr);
+
+      stat_with_rec(table, thd, mdl_on_tab);
+
+      mem_heap_empty(heap);
+
+      mtr_start(&mtr);
+
+      rec = (rec_t *)dd_getnext_system_rec(&pcur, &mtr);
+    }
+
+    mtr_commit(&mtr);
+    dd_table_close(sys_tables, thd, &mdl, true);
+    mem_heap_empty(heap);
+
     mutex_exit(&(dict_sys->mutex));
 
     destroy_internal_thd(thd);
