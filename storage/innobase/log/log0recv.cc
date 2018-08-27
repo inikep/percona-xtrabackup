@@ -65,6 +65,7 @@ this program; if not, write to the Free Software Foundation, Inc.,
 #include "trx0rec.h"
 #include "trx0undo.h"
 #include "ut0new.h"
+#include "xb0xb.h"
 
 #include "my_dbug.h"
 
