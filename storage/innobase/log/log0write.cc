@@ -96,6 +96,11 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA
 /* srv_read_only_mode */
 #include "srv0srv.h"
 
+#ifdef XTRABACKUP
+/* xtrabackup */
+#include "xb0xb.h"
+#endif
+
 /* ut_uint64_align_down */
 #include "ut0byte.h"
 
