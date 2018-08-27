@@ -39,8 +39,6 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 *******************************************************/
 
-//#define XTRABACKUP_TARGET_IS_PLUGIN
-
 #include <my_base.h>
 #include <my_default.h>
 #include <my_getopt.h>
@@ -282,7 +280,6 @@ long innobase_open_files = 300L;
 
 longlong innobase_page_size = (1LL << 14); /* 16KB */
 static ulong innobase_log_block_size = 512;
-// bool	innobase_fast_checksum = FALSE;
 char *innobase_doublewrite_file = NULL;
 char *innobase_buffer_pool_filename = NULL;
 
@@ -599,7 +596,6 @@ enum options_xtrabackup {
   OPT_INNODB_USE_NATIVE_AIO,
   OPT_INNODB_PAGE_SIZE,
   OPT_INNODB_LOG_BLOCK_SIZE,
-  // OPT_INNODB_FAST_CHECKSUM,
   OPT_INNODB_EXTRA_UNDOSLOTS,
   OPT_INNODB_DOUBLEWRITE_FILE,
   OPT_INNODB_BUFFER_POOL_FILENAME,
@@ -613,6 +609,8 @@ enum options_xtrabackup {
   OPT_INNODB_SYNC_SPIN_LOOPS,
   OPT_INNODB_THREAD_CONCURRENCY,
   OPT_INNODB_THREAD_SLEEP_DELAY,
+  OPT_INNODB_REDO_LOG_ENCRYPT,
+  OPT_INNODB_UNDO_LOG_ENCRYPT,
   OPT_XTRA_DEBUG_SYNC,
   OPT_XTRA_COMPACT,
   OPT_XTRA_REBUILD_INDEXES,
@@ -1312,10 +1310,6 @@ Disable with --skip-innodb-doublewrite.",
      (G_PTR *)&innobase_log_block_size, (G_PTR *)&innobase_log_block_size, 0,
      GET_ULONG, REQUIRED_ARG, 512, 512, 1 << UNIV_PAGE_SIZE_SHIFT_MAX, 0, 1L,
      0},
-    // {"innodb_fast_checksum", OPT_INNODB_FAST_CHECKSUM,
-    //  "Change the algorithm of checksum for the whole of datapage to 4-bytes
-    //  word based.", (G_PTR*) &innobase_fast_checksum, (G_PTR*)
-    //  &innobase_fast_checksum, 0, GET_BOOL, NO_ARG, 0, 0, 0, 0, 0, 0},
     {"innodb_doublewrite_file", OPT_INNODB_DOUBLEWRITE_FILE,
      "Path to special datafile for doublewrite buffer. (default is "
      ": not used)",
@@ -1353,6 +1347,14 @@ Disable with --skip-innodb-doublewrite.",
      "Number of undo tablespaces to use.", (G_PTR *)&srv_undo_tablespaces,
      (G_PTR *)&srv_undo_tablespaces, 0, GET_ULONG, REQUIRED_ARG,
      FSP_MIN_UNDO_TABLESPACES, 0, 126, 0, 1, 0},
+
+    {"innodb_redo_log_encrypt", OPT_INNODB_REDO_LOG_ENCRYPT,
+     "Enable or disable Encryption of REDO tablespace.", &srv_redo_log_encrypt,
+     &srv_redo_log_encrypt, 0, GET_BOOL, NO_ARG, false, 0, 0, 0, 0, 0},
+
+    {"innodb_undo_log_encrypt", OPT_INNODB_UNDO_LOG_ENCRYPT,
+     "Enable or disable Encrypt of UNDO tablespace.", &srv_undo_log_encrypt,
+     &srv_undo_log_encrypt, 0, GET_BOOL, NO_ARG, false, 0, 0, 0, 0, 0},
 
     {"defaults_group", OPT_DEFAULTS_GROUP,
      "defaults group in config file (default \"mysqld\").",
@@ -1487,11 +1489,8 @@ You can download full text of the license on http://www.gnu.org/licenses/gpl-2.0
   my_print_variables(xb_client_options);
 }
 
-#define ADD_PRINT_PARAM_OPT(value)                        \
-  {                                                       \
-    print_param_str << opt->name << "=" << value << "\n"; \
-    param_set.insert(opt->name);                          \
-  }
+#define ADD_PRINT_PARAM_OPT(value) \
+  { print_param_str << opt->name << "=" << value << "\n"; }
 
 /************************************************************************
 Check if parameter is set in defaults file or via command line argument
@@ -1519,6 +1518,7 @@ bool xb_get_one_option(int optid, const struct my_option *opt, char *argument) {
     }
   }
   param_str << " ";
+  param_set.insert(opt->name);
   switch (optid) {
     case 'h':
       strmake(mysql_real_data_home, argument, FN_REFLEN - 1);
@@ -1951,8 +1951,6 @@ static bool innodb_init_param(void) {
   /* We cannot treat characterset here for now!! */
   data_mysql_default_charset_coll = (ulint)default_charset_info->number;
 
-  // innobase_commit_concurrency_init_default();
-
   /* Since we in this module access directly the fields of a trx
   struct, and due to different headers and flags it might happen that
   mutex_t has a different size in this module and in InnoDB
@@ -2014,8 +2012,6 @@ static bool innodb_init_param(void) {
     my_free(srv_undo_dir);
     srv_undo_dir = my_strdup(PSI_NOT_INSTRUMENTED, ".", MYF(MY_FAE));
   }
-
-  // innodb_log_checksum_func_update(srv_log_checksum_algorithm);
 
   return (FALSE);
 
@@ -2878,70 +2874,6 @@ skip:
   return (FALSE);
 }
 
-// static
-// void
-// xtrabackup_choose_lsn_offset(lsn_t start_lsn)
-// {
-// 	ulint no, expected_no;
-// 	ulint blocks_in_group;
-// 	lsn_t end_lsn;
-// 	log_group_t *group;
-
-// 	start_lsn = ut_uint64_align_down(start_lsn, OS_FILE_LOG_BLOCK_SIZE);
-// 	end_lsn = start_lsn + RECV_SCAN_SIZE;
-
-// 	group = UT_LIST_GET_FIRST(log_sys->log_groups);
-
-// 	if (mysql_server_version < 50500) {
-// 		/* server doesn't support log files larger than 4G */
-// 		return;
-// 	}
-
-// 	if (server_flavor == FLAVOR_PERCONA_SERVER &&
-// 	    (mysql_server_version > 50500 && mysql_server_version < 50600)) {
-// 		/* it is Percona Server 5.5 */
-// 		group->lsn_offset = group->lsn_offset_ps55;
-// 		return;
-// 	}
-
-// 	if (group->lsn_offset_ps55 == group->lsn_offset ||
-// 	    group->lsn_offset_ps55 == (lsn_t) -1) {
-// 		/* we have only one option */
-// 		return;
-// 	}
-
-// 	no = (ulint) -1;
-
-// 	blocks_in_group = log_block_convert_lsn_to_no(
-// 		log_group_get_capacity(group)) - 1;
-
-// 	lsn_t offsets[2] = {group->lsn_offset,
-// 			    group->lsn_offset_ps55};
-
-// 	expected_no = log_block_convert_lsn_to_no(start_lsn);
-
-// 	for (int i = 0; i < 2; i++) {
-// 		group->lsn_offset = offsets[i];
-
-// 		/* read log block number */
-// 		if (group->lsn_offset < group->file_size * group->n_files &&
-// 		    (log_group_calc_lsn_offset(start_lsn, group) %
-// 		     UNIV_PAGE_SIZE) % OS_FILE_LOG_BLOCK_SIZE == 0) {
-// 			log_group_read_log_seg(log_sys->buf, group,
-// 					       start_lsn, end_lsn);
-// 			no = log_block_get_hdr_no(log_sys->buf);
-// 		}
-
-// 		if ((no <= expected_no &&
-// 			((expected_no - no) % blocks_in_group) == 0) ||
-// 		    ((expected_no | 0x40000000UL) - no) % blocks_in_group == 0)
-// {
-// 			/* offset looks ok */
-// 			return;
-// 		}
-// 	}
-// }
-
 /*******************************************************/ /**
  Scans log from a buffer and writes new log data to the outpud datasinc.
  @return true if success */
@@ -3103,7 +3035,21 @@ static bool xtrabackup_scan_log_recs(
     }
   }
 
-  if (ds_write(dst_log_file, log_sys->buf, write_size)) {
+  byte encrypted_buf[4 * UNIV_PAGE_SIZE_MAX];
+  byte *write_buf = log_sys->buf;
+
+  if (srv_redo_log_encrypt) {
+    IORequest req_type(IORequestLogWrite);
+    fil_space_t *space = fil_space_get(dict_sys_t::s_log_space_first_id);
+    fil_io_set_encryption(req_type, page_id_t(space->id, 0), space);
+    Encryption encryption(req_type.encryption_algorithm());
+    ulint dst_len = write_size;
+    write_buf = encryption.encrypt_log(req_type, log_sys->buf, write_size,
+                                       encrypted_buf, &dst_len);
+    ut_a(write_size == dst_len);
+  }
+
+  if (ds_write(dst_log_file, write_buf, write_size)) {
     msg("xtrabackup: Error: "
         "write to logfile failed\n");
     return (false);
@@ -3171,7 +3117,6 @@ static bool xtrabackup_copy_logfile(log_t &log, lsn_t from_lsn, bool is_last) {
   return (FALSE);
 
 error:
-  // mutex_exit(&log_sys->mutex);
   ds_close(dst_log_file);
   msg("xtrabackup: Error: xtrabackup_copy_logfile() failed.\n");
   return (TRUE);
@@ -3490,14 +3435,10 @@ void xb_load_single_table_tablespace(const char *dirname, const char *filname,
         byte *iv = file.m_encryption_iv;
         ut_ad(key && iv);
 
+        space->flags |= FSP_FLAGS_MASK_ENCRYPTION;
         err = fil_set_encryption(space->id, Encryption::AES, key, iv);
       } else {
-        byte key[ENCRYPTION_KEY_LEN];
-        byte iv[ENCRYPTION_KEY_LEN];
-
-        xb_fetch_tablespace_key(space->id, key, iv);
-
-        err = fil_set_encryption(space->id, Encryption::AES, key, iv);
+        err = xb_set_encryption(space);
       }
 
       ut_ad(err == DB_SUCCESS);
@@ -4157,10 +4098,6 @@ static ulint open_or_create_log_file(
 static void xb_normalize_init_values(void)
 /*==========================*/
 {
-  // srv_log_file_size /= UNIV_PAGE_SIZE;
-
-  // srv_log_buffer_size /= UNIV_PAGE_SIZE;
-
   srv_lock_table_size = 5 * (srv_buf_pool_size / UNIV_PAGE_SIZE);
 }
 
@@ -4403,7 +4340,7 @@ void xtrabackup_backup_func(void) {
     bool log_opened = false;
     ulint err;
     ulint i;
-    fil_space_t *log_space;
+    fil_space_t *log_space = nullptr;
 
     srv_is_being_started = true;
 
@@ -4428,11 +4365,12 @@ void xtrabackup_backup_func(void) {
 
     lock_sys_create(srv_lock_table_size);
 
+    ut_a(srv_n_log_files > 0);
+
     for (i = 0; i < srv_n_log_files; i++) {
       err = open_or_create_log_file(false, &log_file_created, log_opened, 0, i,
                                     &log_space);
       if (err != DB_SUCCESS) {
-        // return((int) err);
         exit(EXIT_FAILURE);
       }
 
@@ -4454,7 +4392,6 @@ void xtrabackup_backup_func(void) {
             "file\n"
             "xtrabackup: and start the database again.\n");
 
-        // return(DB_ERROR);
         exit(EXIT_FAILURE);
       }
     }
@@ -4464,6 +4401,10 @@ void xtrabackup_backup_func(void) {
       msg("xtrabackup: Something wrong with source files...\n");
       exit(EXIT_FAILURE);
     }
+
+    ut_a(log_space != nullptr);
+
+    log_read_encryption();
   }
 
   /* create extra LSN dir if it does not exist. */
@@ -4689,7 +4630,6 @@ void xtrabackup_backup_func(void) {
 
     if (err != DB_SUCCESS) {
       msg("xtrabackup: Error: recv_find_max_checkpoint() failed.\n");
-      // mutex_exit(&log_sys->mutex);
       goto skip_last_cp;
     }
 
@@ -6300,7 +6240,6 @@ static bool xtrabackup_close_temp_log(bool clear_flag) {
     goto error;
   }
 
-  // os_file_close(src_file);
   src_file = XB_FILE_UNDEFINED;
 
   innobase_log_files_in_group = innobase_log_files_in_group_save;

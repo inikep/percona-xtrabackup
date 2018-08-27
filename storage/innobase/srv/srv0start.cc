@@ -120,6 +120,7 @@ this program; if not, write to the Free Software Foundation, Inc.,
 #include "usr0sess.h"
 #include "ut0crc32.h"
 #include "ut0new.h"
+#include "xb0xb.h"
 
 /** fil_space_t::flags for hard-coded tablespaces */
 extern uint32_t predefined_flags;
@@ -410,11 +411,13 @@ static dberr_t create_log_files(char *logfilename, size_t dirnamelen, lsn_t lsn,
   /* Once the redo log is set to be encrypted,
   initialize encryption information. */
   if (srv_redo_log_encrypt) {
+#if !defined(XTRABACKUP)
     if (!Encryption::check_keyring()) {
       ib::error(ER_IB_MSG_1065);
 
       return (DB_ERROR);
     }
+#endif
 
     fsp_flags_set_encryption(log_space->flags);
     err = fil_set_encryption(log_space->id, Encryption::AES, NULL, NULL);
@@ -699,15 +702,23 @@ static dberr_t srv_undo_tablespace_read_encryption(pfs_os_file_t fh,
     return (DB_SUCCESS);
   }
 
-  byte key[ENCRYPTION_KEY_LEN];
-  byte iv[ENCRYPTION_KEY_LEN];
-  if (fsp_header_get_encryption_key(space->flags, key, iv, first_page)) {
-    fsp_flags_set_encryption(space->flags);
-    err = fil_set_encryption(space->id, Encryption::AES, key, iv);
-    ut_ad(err == DB_SUCCESS);
+  if (!use_dumped_tablespace_keys || srv_backup_mode) {
+    byte key[ENCRYPTION_KEY_LEN];
+    byte iv[ENCRYPTION_KEY_LEN];
+    if (fsp_header_get_encryption_key(space->flags, key, iv, first_page)) {
+      fsp_flags_set_encryption(space->flags);
+      err = fil_set_encryption(space->id, Encryption::AES, key, iv);
+      ut_ad(err == DB_SUCCESS);
+    } else {
+      ut_free(first_page_buf);
+      return (DB_FAIL);
+    }
   } else {
-    ut_free(first_page_buf);
-    return (DB_FAIL);
+    err = xb_set_encryption(space);
+    if (err != DB_SUCCESS) {
+      ut_free(first_page_buf);
+      return (DB_FAIL);
+    }
   }
 
   ut_free(first_page_buf);
