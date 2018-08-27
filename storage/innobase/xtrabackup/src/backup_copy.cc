@@ -878,7 +878,8 @@ static bool copy_or_move_file(const char *src_file_path,
              : move_file(datasink, src_file_path, dst_file_path, dst_dir,
                          thread_n));
 
-  if (opt_generate_new_master_key && file_purpose == FILE_PURPOSE_DATAFILE) {
+  if (opt_generate_new_master_key && (file_purpose == FILE_PURPOSE_DATAFILE ||
+                                      file_purpose == FILE_PURPOSE_UNDO_LOG)) {
     reencrypt_datafile_header(dst_dir, dst_file_path, thread_n);
   }
 
