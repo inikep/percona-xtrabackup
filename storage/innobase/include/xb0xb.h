@@ -34,6 +34,12 @@ extern bool use_dumped_tablespace_keys;
 @param[out]	key		fetched tablespace iv */
 [[nodiscard]] bool xb_fetch_tablespace_key(ulint space_id, byte *key, byte *iv);
 
+/** Fetch tablespace key from "xtrabackup_keys" and set the encryption
+type for the tablespace.
+@param[in]	space		tablespace
+@return DB_SUCCESS or error code */
+[[nodiscard]] dberr_t xb_set_encryption(fil_space_t *space);
+
 /** Add file to tablespace map.
 @param[in]	file_name	file name
 @param[in]	tablespace_name	corresponding tablespace name */

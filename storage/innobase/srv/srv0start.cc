@@ -360,16 +360,24 @@ static dberr_t srv_undo_tablespace_read_encryption(pfs_os_file_t fh,
     return (DB_SUCCESS);
   }
 
-  byte key[Encryption::KEY_LEN];
-  byte iv[Encryption::KEY_LEN];
-  Encryption_key e_key{key, iv};
-  if (fsp_header_get_encryption_key(space->flags, e_key, first_page)) {
-    fsp_flags_set_encryption(space->flags);
-    err = fil_set_encryption(space->id, Encryption::AES, key, iv);
-    ut_ad(err == DB_SUCCESS);
+  if (!use_dumped_tablespace_keys || srv_backup_mode) {
+    byte key[Encryption::KEY_LEN];
+    byte iv[Encryption::KEY_LEN];
+    Encryption_key e_key{key, iv};
+    if (fsp_header_get_encryption_key(space->flags, e_key, first_page)) {
+      fsp_flags_set_encryption(space->flags);
+      err = fil_set_encryption(space->id, Encryption::AES, key, iv);
+      ut_ad(err == DB_SUCCESS);
+    } else {
+      ut::aligned_free(first_page);
+      return (DB_FAIL);
+    }
   } else {
-    ut::aligned_free(first_page);
-    return (DB_FAIL);
+    err = xb_set_encryption(space);
+    if (err != DB_SUCCESS) {
+      ut::aligned_free(first_page);
+      return (DB_FAIL);
+    }
   }
 
   ut::aligned_free(first_page);

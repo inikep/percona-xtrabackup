@@ -39,8 +39,6 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 *******************************************************/
 
-//#define XTRABACKUP_TARGET_IS_PLUGIN
-
 #include <my_base.h>
 #include <my_default.h>
 #include <my_getopt.h>
@@ -281,7 +279,6 @@ long innobase_open_files = 300L;
 
 longlong innobase_page_size = (1LL << 14); /* 16KB */
 static ulong innobase_log_block_size = 512;
-// bool	innobase_fast_checksum = false;
 char *innobase_doublewrite_file = NULL;
 char *innobase_buffer_pool_filename = NULL;
 
@@ -604,7 +601,6 @@ enum options_xtrabackup {
   OPT_INNODB_USE_NATIVE_AIO,
   OPT_INNODB_PAGE_SIZE,
   OPT_INNODB_LOG_BLOCK_SIZE,
-  // OPT_INNODB_FAST_CHECKSUM,
   OPT_INNODB_EXTRA_UNDOSLOTS,
   OPT_INNODB_DOUBLEWRITE_FILE,
   OPT_INNODB_BUFFER_POOL_FILENAME,
@@ -618,6 +614,8 @@ enum options_xtrabackup {
   OPT_INNODB_SYNC_SPIN_LOOPS,
   OPT_INNODB_THREAD_CONCURRENCY,
   OPT_INNODB_THREAD_SLEEP_DELAY,
+  OPT_INNODB_REDO_LOG_ENCRYPT,
+  OPT_INNODB_UNDO_LOG_ENCRYPT,
   OPT_XTRA_DEBUG_SYNC,
   OPT_XTRA_COMPACT,
   OPT_XTRA_REBUILD_INDEXES,
@@ -1317,10 +1315,6 @@ Disable with --skip-innodb-doublewrite.",
      (G_PTR *)&innobase_log_block_size, (G_PTR *)&innobase_log_block_size, 0,
      GET_ULONG, REQUIRED_ARG, 512, 512, 1 << UNIV_PAGE_SIZE_SHIFT_MAX, 0, 1L,
      0},
-    // {"innodb_fast_checksum", OPT_INNODB_FAST_CHECKSUM,
-    //  "Change the algorithm of checksum for the whole of datapage to 4-bytes
-    //  word based.", (G_PTR*) &innobase_fast_checksum, (G_PTR*)
-    //  &innobase_fast_checksum, 0, GET_BOOL, NO_ARG, 0, 0, 0, 0, 0, 0},
     {"innodb_doublewrite_file", OPT_INNODB_DOUBLEWRITE_FILE,
      "Path to special datafile for doublewrite buffer. (default is "
      ": not used)",
@@ -1366,6 +1360,14 @@ Disable with --skip-innodb-doublewrite.",
      "Number of undo tablespaces to use.", (G_PTR *)&srv_undo_tablespaces,
      (G_PTR *)&srv_undo_tablespaces, 0, GET_ULONG, REQUIRED_ARG,
      FSP_MIN_UNDO_TABLESPACES, 0, 126, 0, 1, 0},
+
+    {"innodb_redo_log_encrypt", OPT_INNODB_REDO_LOG_ENCRYPT,
+     "Enable or disable Encryption of REDO tablespace.", &srv_redo_log_encrypt,
+     &srv_redo_log_encrypt, 0, GET_BOOL, NO_ARG, false, 0, 0, 0, 0, 0},
+
+    {"innodb_undo_log_encrypt", OPT_INNODB_UNDO_LOG_ENCRYPT,
+     "Enable or disable Encrypt of UNDO tablespace.", &srv_undo_log_encrypt,
+     &srv_undo_log_encrypt, 0, GET_BOOL, NO_ARG, false, 0, 0, 0, 0, 0},
 
     {"defaults_group", OPT_DEFAULTS_GROUP,
      "defaults group in config file (default \"mysqld\").",
@@ -1500,11 +1502,8 @@ You can download full text of the license on http://www.gnu.org/licenses/gpl-2.0
   my_print_variables(xb_client_options);
 }
 
-#define ADD_PRINT_PARAM_OPT(value)                        \
-  {                                                       \
-    print_param_str << opt->name << "=" << value << "\n"; \
-    param_set.insert(opt->name);                          \
-  }
+#define ADD_PRINT_PARAM_OPT(value) \
+  { print_param_str << opt->name << "=" << value << "\n"; }
 
 /************************************************************************
 Check if parameter is set in defaults file or via command line argument
@@ -1532,6 +1531,7 @@ bool xb_get_one_option(int optid, const struct my_option *opt, char *argument) {
     }
   }
   param_str << " ";
+  param_set.insert(opt->name);
   switch (optid) {
     case '#':
       dbug_setting = argument ? argument : "d,ib_log";
@@ -1966,8 +1966,6 @@ static bool innodb_init_param(void) {
   /* We cannot treat characterset here for now!! */
   data_mysql_default_charset_coll = (ulint)default_charset_info->number;
 
-  // innobase_commit_concurrency_init_default();
-
   /* Since we in this module access directly the fields of a trx
   struct, and due to different headers and flags it might happen that
   mutex_t has a different size in this module and in InnoDB
@@ -2029,8 +2027,6 @@ static bool innodb_init_param(void) {
     my_free(srv_undo_dir);
     srv_undo_dir = my_strdup(PSI_NOT_INSTRUMENTED, ".", MYF(MY_FAE));
   }
-
-  // innodb_log_checksum_func_update(srv_log_checksum_algorithm);
 
   return (false);
 
@@ -3468,10 +3464,6 @@ static void xb_filters_free() {
 static void xb_normalize_init_values(void)
 /*==========================*/
 {
-  // srv_log_file_size /= UNIV_PAGE_SIZE;
-
-  // srv_log_buffer_size /= UNIV_PAGE_SIZE;
-
   srv_lock_table_size = 5 * (srv_buf_pool_size / UNIV_PAGE_SIZE);
 }
 
@@ -5344,7 +5336,6 @@ static bool xtrabackup_close_temp_log(bool clear_flag) {
     goto error;
   }
 
-  // os_file_close(src_file);
   src_file = XB_FILE_UNDEFINED;
 
   innobase_log_files_in_group = innobase_log_files_in_group_save;

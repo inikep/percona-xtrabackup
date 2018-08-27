@@ -16,7 +16,6 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
 
 *******************************************************/
 
-#include "keyring_plugins.h"
 #include <base64.h>
 #include <my_aes.h>
 #include <my_default.h>
@@ -30,15 +29,17 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
 #include <sql/sql_plugin.h>
 #include <sql_plugin.h>
 #include <ut0crc32.h>
-#include "backup_mysql.h"
 #include "common.h"
 #include "kdf.h"
+
+#include "backup_mysql.h"
+#include "fil0fil.h"
+#include "keyring_plugins.h"
 #include "rpl_log_encryption.h"
 #include "xb0xb.h"
 #include "xtrabackup.h"
 
 #include <map>
-#include "fil0fil.h"
 
 struct tablespace_encryption_info {
   byte key[Encryption::KEY_LEN];
@@ -98,6 +99,21 @@ bool xb_fetch_tablespace_key(ulint space_id, byte *key, byte *iv) {
   memcpy(iv, it->second.iv, Encryption::KEY_LEN);
 
   return (true);
+}
+
+/** Fetch tablespace key from "xtrabackup_keys" and set the encryption
+type for the tablespace.
+@param[in]	space		tablespace
+@return DB_SUCCESS or error code */
+dberr_t xb_set_encryption(fil_space_t *space) {
+  byte key[Encryption::KEY_LEN];
+  byte iv[Encryption::KEY_LEN];
+
+  bool found = xb_fetch_tablespace_key(space->id, key, iv);
+  ut_a(found);
+
+  space->flags |= FSP_FLAGS_MASK_ENCRYPTION;
+  return (fil_set_encryption(space->id, Encryption::AES, key, iv));
 }
 
 const char *TRANSITION_KEY_PRIFIX = "XBKey";
