@@ -766,7 +766,7 @@ static void page_checksum_fix(byte *page, const page_size_t &page_size) {
                   checksum);
 
   BlockReporter reporter = BlockReporter(false, page, page_size, false);
-  ut_ad(!reporter.is_corrupted());
+  ut_a(!reporter.is_corrupted());
 }
 
 /************************************************************************
