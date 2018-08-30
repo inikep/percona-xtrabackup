@@ -2585,7 +2585,8 @@ detect this and will eventually quit sooner. */
         return i;
       }
     }
-    ut_ad(0);
+    ut_a(0);
+    return 1;
   }
 
   /** Gets the nth column of a table.
