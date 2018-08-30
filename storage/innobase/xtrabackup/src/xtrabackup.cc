@@ -2197,6 +2197,14 @@ static bool innodb_init(bool init_dd) {
 
   if (init_dd) {
     dict_load_from_spaces_sdi();
+    if (dict_sys->dynamic_metadata == nullptr)
+      dict_sys->dynamic_metadata =
+          dd_table_open_on_name(NULL, NULL, "mysql/innodb_dynamic_metadata",
+                                false, DICT_ERR_IGNORE_NONE);
+    if (dict_persist->table_buffer == nullptr)
+      dict_persist->table_buffer =
+          ut::new_withkey<DDTableBuffer>(UT_NEW_THIS_FILE_PSI_KEY);
+    srv_dict_recover_on_restart();
   }
 
   srv_start_threads();
