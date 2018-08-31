@@ -123,8 +123,6 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #define DICT_TF_FORMAT_ZIP 1
 #define DICT_TF_FORMAT_SHIFT 5
 
-static void init_mysql_environment();
-
 static MEM_ROOT argv_alloc{PSI_NOT_INSTRUMENTED, 512};
 
 int sys_var_init();
@@ -2121,8 +2119,6 @@ dberr_t dict_load_tables_from_space_id(space_id_t space_id, THD *thd,
       goto error;
     }
   }
-
-  return (DB_SUCCESS);
 
 error:
   ut_free(compressed_sdi);
@@ -4795,6 +4791,8 @@ skip_last_cp:
 
   xb_data_files_close();
 
+  recv_sys_free();
+
   recv_sys_close();
 
   clone_free();
@@ -5220,7 +5218,7 @@ static void xtrabackup_stats_func(int argc, char **argv) {
 
     mtr_commit(&mtr);
     dd_table_close(sys_tables, thd, &mdl, true);
-    mem_heap_empty(heap);
+    mem_heap_free(heap);
 
     mutex_exit(&(dict_sys->mutex));
 
@@ -5238,6 +5236,8 @@ static void xtrabackup_stats_func(int argc, char **argv) {
   if (innodb_end()) exit(EXIT_FAILURE);
 
   xb_keyring_shutdown();
+
+  cleanup_mysql_environment();
 }
 
 /* ================= prepare ================= */
