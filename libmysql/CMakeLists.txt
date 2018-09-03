@@ -240,12 +240,8 @@ IF(WIN32)
   LIST(APPEND LIBS_TO_MERGE auth_win_client)
 ENDIF()
 
-# LDAP authentication SASL client plugin
-MESSAGE(STATUS "Creating LDAP authentication SASL client library.")
-ADD_SUBDIRECTORY(authentication_ldap)
-  
 # Merge several convenience libraries into one big mysqlclient
-MERGE_CONVENIENCE_LIBRARIES(mysqlclient ${LIBS_TO_MERGE} COMPONENT Development)
+MERGE_CONVENIENCE_LIBRARIES(mysqlclient ${LIBS_TO_MERGE} COMPONENT Development SKIP_INSTALL)
 TARGET_LINK_LIBRARIES(mysqlclient PRIVATE ${LIBS_TO_LINK})
 
 # Visual Studio users need debug  static library for debug projects
