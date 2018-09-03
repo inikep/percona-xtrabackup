@@ -111,8 +111,6 @@ MYSQL_ADD_PLUGIN(myisam ha_myisam.cc
   LINK_LIBRARIES myisam_library
 )
 
-DISABLE_MISSING_PROFILE_WARNING()
-
 MYSQL_ADD_EXECUTABLE(myisam_ftdump myisam_ftdump.cc)
 TARGET_LINK_LIBRARIES(myisam_ftdump myisam_library)
 
