@@ -71,16 +71,16 @@ ADD_DEPENDENCIES(myisam_nopfs GenError)
 TARGET_LINK_LIBRARIES(myisam_nopfs mysys myisam_sys)
 SET(MYISAM_NOPFS myisam_nopfs)
 
-MYSQL_ADD_EXECUTABLE(myisam_ftdump myisam_ftdump.cc)
+MYSQL_ADD_EXECUTABLE(myisam_ftdump myisam_ftdump.cc SKIP_INSTALL)
 TARGET_LINK_LIBRARIES(myisam_ftdump ${MYISAM_NOPFS} mysys_ssl)
 
-MYSQL_ADD_EXECUTABLE(myisamchk myisamchk.cc)
+MYSQL_ADD_EXECUTABLE(myisamchk myisamchk.cc SKIP_INSTALL)
 TARGET_LINK_LIBRARIES(myisamchk ${MYISAM_NOPFS} mysys_ssl)
 
-MYSQL_ADD_EXECUTABLE(myisamlog myisamlog.cc)
+MYSQL_ADD_EXECUTABLE(myisamlog myisamlog.cc SKIP_INSTALL)
 TARGET_LINK_LIBRARIES(myisamlog ${MYISAM_NOPFS} ${LIBSOCKET})
 
-MYSQL_ADD_EXECUTABLE(myisampack myisampack.cc)
+MYSQL_ADD_EXECUTABLE(myisampack myisampack.cc SKIP_INSTALL)
 TARGET_LINK_LIBRARIES(myisampack ${MYISAM_NOPFS} mysys_ssl)
 
 IF (MSVC)
