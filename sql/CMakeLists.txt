@@ -1076,15 +1076,6 @@ ADD_CUSTOM_COMMAND(
   DEPENDS gen_lex_hash
 )
 
-MYSQL_ADD_EXECUTABLE(mysql_tzinfo_to_sql
-  time_zone_common.cc
-  mysql_tzinfo_to_sql.cc
-  DEPENDENCIES GenError
-  LINK_LIBRARIES mysys
-  )
-SET_TARGET_PROPERTIES(mysql_tzinfo_to_sql
-  PROPERTIES COMPILE_FLAGS "-DDISABLE_PSI_FILE=1 -DABBR_ARE_USED")
-
 ADD_CUSTOM_TARGET( 
         GenServerSource
         DEPENDS ${GEN_SOURCES}
@@ -1099,26 +1090,6 @@ ADD_CUSTOM_TARGET(
   GenKeywordList
   DEPENDS ${GEN_KEYWORD_LIST_SOURCES}
 )
-
-MYSQL_ADD_PLUGIN(udf_example udf_example.cc
-  MODULE_ONLY TEST_ONLY MODULE_OUTPUT_NAME "udf_example"
-  )
-# MYSQL_ADD_PLUGIN may have decided not to build it.
-IF(WIN32 AND TARGET udf_example)
-  SET_TARGET_PROPERTIES(udf_example
-    PROPERTIES LINK_FLAGS
-    "/DEF:${CMAKE_CURRENT_SOURCE_DIR}/udf_example.def")
-ENDIF()
-
-MYSQL_ADD_PLUGIN(locking_service locking_service_udf.cc
-  MODULE_ONLY MODULE_OUTPUT_NAME "locking_service"
-  )
-# MYSQL_ADD_PLUGIN may have decided not to build it.
-IF(WIN32 AND TARGET locking_service)
-  SET_TARGET_PROPERTIES(locking_service
-    PROPERTIES LINK_FLAGS
-    "/DEF:${CMAKE_CURRENT_SOURCE_DIR}/locking_service.def")
-ENDIF()
 
 FOREACH(tool gtar tar git)
   STRING(TOUPPER ${tool}  TOOL)
