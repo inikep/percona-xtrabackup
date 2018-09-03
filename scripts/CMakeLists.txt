@@ -377,6 +377,7 @@ IF(WIN32)
 
 ELSE()
 
+
   SET(PKGCONFIG_FILE ${LIBMYSQL_OS_OUTPUT_NAME}.pc)
   STRING(REGEX REPLACE "/mysql$" "" PKGCONFIG_DIR "${INSTALL_LIBDIR}")
   SET(PKGCONFIG_DIR "${PKGCONFIG_DIR}/pkgconfig")
@@ -390,32 +391,6 @@ ELSE()
   CONFIGURE_FILE(mysqlclient.pc.in
     ${CMAKE_CURRENT_BINARY_DIR}/${PKGCONFIG_FILE}
     ESCAPE_QUOTES @ONLY)
-
-  IF(INSTALL_PKGCONFIGDIR)
-    MESSAGE(STATUS "INSTALL ${PKGCONFIG_FILE} ${INSTALL_PKGCONFIGDIR}")
-    INSTALL(FILES
-      ${CMAKE_CURRENT_BINARY_DIR}/${PKGCONFIG_FILE}
-      DESTINATION ${INSTALL_PKGCONFIGDIR}
-      PERMISSIONS OWNER_READ OWNER_WRITE GROUP_READ WORLD_READ
-      COMPONENT Development
-      )
-  ENDIF()
-
-  # mysqld_safe used in mtr even for systemd platforms
-  IF(WITH_SYSTEMD)
-    SET(BIN_SCRIPTS
-      mysql_config
-      mysqldumpslow
-      mysqld_safe
-      )
-  ELSE()
-    SET(BIN_SCRIPTS
-      mysql_config
-      mysqldumpslow
-      mysqld_multi
-      mysqld_safe
-      )
-  ENDIF()
 
   FOREACH(file ${BIN_SCRIPTS})
     IF(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/${file}.sh)
