@@ -279,7 +279,7 @@ ADD_SUBDIRECTORY(authentication_kerberos)
 # Merge several convenience libraries into one big mysqlclient
 MERGE_CONVENIENCE_LIBRARIES(mysqlclient ${LIBS_TO_MERGE}
   COMPONENT Development
-  LINK_LIBRARIES ${LIBS_TO_LINK}
+  LINK_LIBRARIES ${LIBS_TO_LINK} SKIP_INSTALL
   )
 
 # Visual Studio users need debug  static library for debug projects
