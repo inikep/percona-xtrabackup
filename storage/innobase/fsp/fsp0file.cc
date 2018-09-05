@@ -542,6 +542,7 @@ dberr_t Datafile::validate_first_page(space_id_t space_id, lsn_t *flush_lsn,
   char *prev_name;
   char *prev_filepath;
   const char *error_txt = NULL;
+  dberr_t err_code = DB_CORRUPTION; /* default error code */
 
   m_is_valid = true;
 
@@ -569,6 +570,7 @@ dberr_t Datafile::validate_first_page(space_id_t space_id, lsn_t *flush_lsn,
 
     if (nonzero_bytes == 0) {
       error_txt = "Header page consists of zero bytes";
+      err_code = DB_PAGE_IS_BLANK;
     }
   }
 
@@ -647,7 +649,7 @@ dberr_t Datafile::validate_first_page(space_id_t space_id, lsn_t *flush_lsn,
 
     free_first_page();
 
-    return (DB_CORRUPTION);
+    return (err_code);
   }
 
   /* For encrypted tablespace, check the encryption info in the
@@ -674,7 +676,7 @@ dberr_t Datafile::validate_first_page(space_id_t space_id, lsn_t *flush_lsn,
       ut_free(m_encryption_iv);
       m_encryption_key = NULL;
       m_encryption_iv = NULL;
-      return (DB_INVALID_ENCRYPTION_META);
+      return (DB_PAGE_IS_BLANK);
     } else {
       ib::info(ER_IB_MSG_402) << "Read encryption metadata from " << m_filepath
                               << " successfully, encryption"
