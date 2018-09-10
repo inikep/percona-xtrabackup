@@ -39,23 +39,25 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 *******************************************************/
 
-#include <mysql.h>
-#include <my_sys.h>
-#include <sql_plugin.h>
+#include "backup_mysql.h"
 #include <ha_prototypes.h>
+#include <my_rapidjson_size_t.h>
+#include <my_sys.h>
+#include <mysql.h>
+#include <os0thread-create.h>
+#include <rapidjson/document.h>
+#include <sql_list.h>
+#include <sql_plugin.h>
 #include <srv0srv.h>
 #include <string.h>
 #include <limits>
-#include <sql_list.h>
-#include <os0thread-create.h>
-#include "typelib.h"
+#include "backup_copy.h"
 #include "common.h"
+#include "mysqld.h"
+#include "typelib.h"
+#include "xb0xb.h"
 #include "xtrabackup.h"
 #include "xtrabackup_version.h"
-#include "xb0xb.h"
-#include "backup_copy.h"
-#include "backup_mysql.h"
-#include "mysqld.h"
 
 extern uint opt_ssl_mode;
 extern char *opt_ssl_ca;
@@ -93,12 +95,14 @@ unsigned long mysql_server_version = 0;
 /* server capabilities */
 bool have_changed_page_bitmaps = false;
 bool have_backup_locks = false;
-bool have_backup_safe_binlog_info = false;
 bool have_lock_wait_timeout = false;
 bool have_galera_enabled = false;
 bool have_flush_engine_logs = false;
 bool have_multi_threaded_slave = false;
 bool have_gtid_slave = false;
+bool have_myisam_tables = false;
+
+bool slave_auto_position = false;
 
 /* Kill long selects */
 os_thread_id_t	kill_query_thread_id;
@@ -108,7 +112,7 @@ os_event_t	kill_query_thread_stop;
 
 bool sql_thread_started = false;
 std::string mysql_slave_position;
-char *mysql_binlog_position = NULL;
+std::string mysql_binlog_position;
 char *buffer_pool_filename = NULL;
 static char *backup_uuid = NULL;
 
@@ -122,23 +126,9 @@ const char *xb_stream_format_name[] = {"file", "xbstream"};
 
 MYSQL *mysql_connection;
 
-/* Whether LOCK BINLOG FOR BACKUP has been issued during backup */
-static bool binlog_locked;
-
 /* Whether LOCK TABLES FOR BACKUP / FLUSH TABLES WITH READ LOCK has been issued
 during backup */
 static bool tables_locked;
-
-// extern "C" {
-// MYSQL *STDCALL cli_mysql_real_connect(MYSQL *mysql, const char *host,
-//                                       const char *user, const char *passwd,
-//                                       const char *db, uint port,
-//                                       const char *unix_socket,
-//                                       ulong client_flag);
-// }
-
-// #define mysql_real_connect cli_mysql_real_connect
-
 
 MYSQL *
 xb_mysql_connect()
@@ -278,11 +268,11 @@ read_mysql_variables_from_result(MYSQL_RES *mysql_result, mysql_variable *vars,
 			char *name = row[0];
 			char *value = row[1];
 			for (var = vars; var->name; var++) {
-				if (strcmp(var->name, name) == 0
-				    && value != NULL) {
-					*(var->value) = strdup(value);
-				}
-			}
+                          if (strcasecmp(var->name, name) == 0 &&
+                              value != NULL) {
+                            *(var->value) = strdup(value);
+                          }
+                        }
 		}
 	} else {
 		MYSQL_FIELD *field;
@@ -296,11 +286,11 @@ read_mysql_variables_from_result(MYSQL_RES *mysql_result, mysql_variable *vars,
 				char *name = field->name;
 				char *value = row[i];
 				for (var = vars; var->name; var++) {
-					if (strcmp(var->name, name) == 0
-					    && value != NULL) {
-						*(var->value) = strdup(value);
-					}
-				}
+                                  if (strcasecmp(var->name, name) == 0 &&
+                                      value != NULL) {
+                                    *(var->value) = strdup(value);
+                                  }
+                                }
 				++i;
 			}
 		}
@@ -435,7 +425,6 @@ get_mysql_vars(MYSQL *connection)
 	char *version_comment_var = NULL;
 	char *innodb_version_var = NULL;
 	char *have_backup_locks_var = NULL;
-	char *have_backup_safe_binlog_info_var = NULL;
 	char *log_bin_var = NULL;
 	char *lock_wait_timeout_var= NULL;
 	char *wsrep_on_var = NULL;
@@ -462,7 +451,6 @@ get_mysql_vars(MYSQL *connection)
 
         mysql_variable mysql_vars[] = {
             {"have_backup_locks", &have_backup_locks_var},
-            {"have_backup_safe_binlog_info", &have_backup_safe_binlog_info_var},
             {"log_bin", &log_bin_var},
             {"lock_wait_timeout", &lock_wait_timeout_var},
             {"gtid_mode", &gtid_mode_var},
@@ -492,14 +480,6 @@ get_mysql_vars(MYSQL *connection)
 
 	if (have_backup_locks_var != NULL && !opt_no_backup_locks) {
 		have_backup_locks = true;
-	}
-
-	if (have_backup_safe_binlog_info_var == NULL &&
-	    opt_binlog_info == BINLOG_INFO_LOCKLESS) {
-
-		msg("Error: --binlog-info=LOCKLESS is not supported by the "
-		    "server\n");
-		return(false);
 	}
 
 	if (lock_wait_timeout_var != NULL) {
@@ -534,17 +514,6 @@ get_mysql_vars(MYSQL *connection)
 	if ((gtid_mode_var && strcmp(gtid_mode_var, "ON") == 0) ||
 	    (gtid_slave_pos_var && *gtid_slave_pos_var)) {
 		have_gtid_slave = true;
-	}
-
-	if (opt_binlog_info == BINLOG_INFO_AUTO) {
-
-		if (have_backup_safe_binlog_info_var != NULL &&
-		    !have_gtid_slave)
-			opt_binlog_info = BINLOG_INFO_LOCKLESS;
-		else if (log_bin_var != NULL && !strcmp(log_bin_var, "ON"))
-			opt_binlog_info = BINLOG_INFO_ON;
-		else
-			opt_binlog_info = BINLOG_INFO_OFF;
 	}
 
 	msg("Using server version %s\n", version_var);
@@ -730,7 +699,34 @@ detect_mysql_capabilities_for_backup()
 		return(false);
 	}
 
-	return(true);
+        char *count_str = read_mysql_one_value(
+            mysql_connection,
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE engine = 'MyISAM'");
+        unsigned long long count = strtoull(count_str, NULL, 10);
+        have_myisam_tables = (count > 0);
+        free(count_str);
+
+        if (opt_slave_info) {
+          char *auto_position = NULL;
+
+          mysql_variable status[] = {{"Auto_Position", &auto_position},
+                                     {NULL, NULL}};
+
+          MYSQL_RES *res =
+              xb_mysql_query(mysql_connection, "SHOW SLAVE STATUS", true, true);
+
+          slave_auto_position = true;
+
+          while (read_mysql_variables_from_result(res, status, false)) {
+            slave_auto_position =
+                slave_auto_position && (strcmp(auto_position, "1") == 0);
+            free_mysql_variables(status);
+          }
+          mysql_free_result(res);
+        }
+
+        return(true);
 }
 
 static
@@ -1052,103 +1048,92 @@ lock_tables_for_backup(MYSQL *connection, int timeout)
 	return(false);
 }
 
-/*********************************************************************//**
-Function acquires either a backup tables lock, if supported
-by the server, or a global read lock (FLUSH TABLES WITH READ LOCK)
-otherwise.
-@returns true if lock acquired */
-bool
-lock_tables_maybe(MYSQL *connection)
-{
-	if (tables_locked || opt_lock_ddl_per_table) {
-		return(true);
-	}
+/*********************************************************************/ /**
+ Function acquires a FLUSH TABLES WITH READ LOCK.
+ @returns true if lock acquired */
+bool lock_tables_ftwrl(MYSQL *connection) {
+  if (have_lock_wait_timeout) {
+    /* Set the maximum supported session value for
+    lock_wait_timeout to prevent unnecessary timeouts when the
+    global value is changed from the default */
+    xb_mysql_query(connection, "SET SESSION lock_wait_timeout=31536000", false);
+  }
 
-	if (have_backup_locks) {
-		return lock_tables_for_backup(connection);
-	}
+  if (!opt_lock_wait_timeout && !opt_kill_long_queries_timeout) {
+    /* We do first a FLUSH TABLES. If a long update is running, the
+    FLUSH TABLES will wait but will not stall the whole mysqld, and
+    when the long update is done the FLUSH TABLES WITH READ LOCK
+    will start and succeed quickly. So, FLUSH TABLES is to lower
+    the probability of a stage where both mysqldump and most client
+    connections are stalled. Of course, if a second long update
+    starts between the two FLUSHes, we have that bad stall.
 
-	if (have_lock_wait_timeout) {
-		/* Set the maximum supported session value for
-		lock_wait_timeout to prevent unnecessary timeouts when the
-		global value is changed from the default */
-		xb_mysql_query(connection,
-			"SET SESSION lock_wait_timeout=31536000", false);
-	}
+    Option lock_wait_timeout serve the same purpose and is not
+    compatible with this trick.
+    */
 
-	if (!opt_lock_wait_timeout && !opt_kill_long_queries_timeout) {
+    msg_ts("Executing FLUSH NO_WRITE_TO_BINLOG TABLES...\n");
 
-		/* We do first a FLUSH TABLES. If a long update is running, the
-		FLUSH TABLES will wait but will not stall the whole mysqld, and
-		when the long update is done the FLUSH TABLES WITH READ LOCK
-		will start and succeed quickly. So, FLUSH TABLES is to lower
-		the probability of a stage where both mysqldump and most client
-		connections are stalled. Of course, if a second long update
-		starts between the two FLUSHes, we have that bad stall.
+    xb_mysql_query(connection, "FLUSH NO_WRITE_TO_BINLOG TABLES", false);
+  }
 
-		Option lock_wait_timeout serve the same purpose and is not
-		compatible with this trick.
-		*/
+  if (opt_lock_wait_timeout) {
+    if (!wait_for_no_updates(connection, opt_lock_wait_timeout,
+                             opt_lock_wait_threshold)) {
+      return (false);
+    }
+  }
 
-		msg_ts("Executing FLUSH NO_WRITE_TO_BINLOG TABLES...\n");
+  msg_ts("Executing FLUSH TABLES WITH READ LOCK...\n");
 
-		xb_mysql_query(connection,
-			       "FLUSH NO_WRITE_TO_BINLOG TABLES", false);
-	}
+  if (opt_kill_long_queries_timeout) {
+    start_query_killer();
+  }
 
-	if (opt_lock_wait_timeout) {
-		if (!wait_for_no_updates(connection, opt_lock_wait_timeout,
-					 opt_lock_wait_threshold)) {
-			return(false);
-		}
-	}
+  if (have_galera_enabled) {
+    xb_mysql_query(connection, "SET SESSION wsrep_causal_reads=0", false);
+  }
 
-	msg_ts("Executing FLUSH TABLES WITH READ LOCK...\n");
+  xb_mysql_query(connection, "FLUSH TABLES WITH READ LOCK", false);
 
-	if (opt_kill_long_queries_timeout) {
-		start_query_killer();
-	}
+  if (opt_kill_long_queries_timeout) {
+    stop_query_killer();
+  }
 
-	if (have_galera_enabled) {
-		xb_mysql_query(connection,
-				"SET SESSION wsrep_causal_reads=0", false);
-	}
+  tables_locked = true;
 
-	xb_mysql_query(connection, "FLUSH TABLES WITH READ LOCK", false);
-
-	if (opt_kill_long_queries_timeout) {
-		stop_query_killer();
-	}
-
-	tables_locked = true;
-
-	return(true);
+  return (true);
 }
 
+/*********************************************************************/ /**
+ Function acquires either a backup tables lock, if supported
+ by the server, or a global read lock (FLUSH TABLES WITH READ LOCK)
+ otherwise. If server does not contain MyISAM tables, no lock will be
+ acquired. If slave_info option is specified and slave is not
+ using auto_position.
+ @returns true if lock acquired */
+bool lock_tables_maybe(MYSQL *connection) {
+  bool force_ftwrl = opt_slave_info && !slave_auto_position &&
+                     !(server_flavor == FLAVOR_PERCONA_SERVER);
 
-/*********************************************************************//**
-If backup locks are used, execute LOCK BINLOG FOR BACKUP provided that we are
-not in the --no-lock mode and the lock has not been acquired already.
-@returns true if lock acquired */
-bool
-lock_binlog_maybe(MYSQL *connection)
-{
-	if (have_backup_locks && !opt_no_lock && !binlog_locked) {
-		msg_ts("Executing LOCK BINLOG FOR BACKUP...\n");
-		xb_mysql_query(connection, "LOCK BINLOG FOR BACKUP", false);
-		binlog_locked = true;
+  if (tables_locked || (opt_lock_ddl_per_table && !force_ftwrl)) {
+    return (true);
+  }
 
-		return(true);
-	}
+  if (!have_myisam_tables && !force_ftwrl) {
+    return (true);
+  }
 
-	return(false);
+  if (have_backup_locks && !force_ftwrl) {
+    return lock_tables_for_backup(connection);
+  }
+
+  return lock_tables_ftwrl(connection);
 }
 
-
-/*********************************************************************//**
-Releases either global read lock acquired with FTWRL and the binlog
-lock acquired with LOCK BINLOG FOR BACKUP, depending on
-the locking strategy being used */
+/*********************************************************************/ /**
+ Releases the lock acquired with FTWRL/LOCK TABLES FOR BACKUP, depending on
+ the locking strategy being used */
 void
 unlock_all(MYSQL *connection)
 {
@@ -1156,11 +1141,6 @@ unlock_all(MYSQL *connection)
 		msg_ts("Debug sleep for %u seconds\n",
 		       opt_debug_sleep_before_unlock);
 		os_thread_sleep(opt_debug_sleep_before_unlock * 1000);
-	}
-
-	if (binlog_locked) {
-		msg_ts("Executing UNLOCK BINLOG\n");
-		xb_mysql_query(connection, "UNLOCK BINLOG", false);
 	}
 
 	msg_ts("Executing UNLOCK TABLES\n");
@@ -1327,24 +1307,24 @@ cleanup:
 	return(result);
 }
 
-static
-size_t format_append(std::string& dest, const char *format, ...)
-	MY_ATTRIBUTE((format(printf, 2, 3)));
+typedef struct {
+  std::string channel_name;
+  std::string relay_log_file;
+  uint64_t relay_log_position;
+  std::string relay_master_log_file;
+  uint64_t exec_master_log_position;
+} replication_channel_status_t;
 
-static
-size_t format_append(std::string& dest, const char *format, ...) {
-	char* buffer;
-	int len = 0;
-	va_list ap;
+typedef struct {
+  std::string filename;
+  uint64_t position;
+  std::string gtid_executed;
+  lsn_t lsn;
+  lsn_t lsn_checkpoint;
+  std::vector<replication_channel_status_t> channels;
+} log_status_t;
 
-	va_start(ap, format);
-	ut_a((len = vasprintf(&buffer, format, ap)) != -1 );
-	va_end(ap);
-
-	dest += buffer;
-	free(buffer);
-	return (size_t)len;
-}
+static log_status_t log_status;
 
 /*********************************************************************//**
 Retrieves MySQL binlog position of the master server in a replication
@@ -1353,131 +1333,99 @@ variable. */
 bool
 write_slave_info(MYSQL *connection)
 {
-	char *master = NULL;
-	char *filename = NULL;
-	char *gtid_executed = NULL;
-	char *position = NULL;
-	char *gtid_slave_pos = NULL;
-	char *auto_position = NULL;
-	char *using_gtid = NULL;
+  std::stringstream slave_info;
+  std::stringstream mysql_slave_position_s;
+  char *master = NULL;
+  char *filename = NULL;
+  char *position = NULL;
+  char *auto_position = NULL;
+  char *channel_name = NULL;
+  bool result = true;
 
-	char *ptr = NULL;
-	char *writable_channel_name = NULL;
-	const char* channel_info = NULL;
-	const size_t channel_info_maxlen = 128;
-	bool result = true;
-	char channel_info_buf[channel_info_maxlen];
-	std::string slave_info;
+  typedef struct {
+    std::string master;
+    std::string filename;
+    uint64_t position;
+    bool auto_position;
+  } channel_info_t;
 
-	mysql_variable status[] = {
-		{"Master_Host", &master},
-		{"Relay_Master_Log_File", &filename},
-		{"Exec_Master_Log_Pos", &position},
-		{"Executed_Gtid_Set", &gtid_executed},
-		{"Channel_Name", &writable_channel_name},
-		{"Auto_Position", &auto_position},
-		{"Using_Gtid", &using_gtid},
-		{NULL, NULL}
-	};
+  std::map<std::string, channel_info_t> channels;
 
-	mysql_variable variables[] = {
-		{"gtid_slave_pos", &gtid_slave_pos},
-		{NULL, NULL}
-	};
-	read_mysql_variables(connection, "SHOW VARIABLES", variables, true);
+  mysql_variable status[] = {
+      {"Master_Host", &master},           {"Relay_Master_Log_File", &filename},
+      {"Exec_Master_Log_Pos", &position}, {"Channel_Name", &channel_name},
+      {"Auto_Position", &auto_position},  {NULL, NULL}};
 
-	MYSQL_RES* slave_status_res = xb_mysql_query(connection,
-		"SHOW SLAVE STATUS", true, true);
-	int master_index = 0;
-	while (read_mysql_variables_from_result(slave_status_res, status,
-		false)) {
-		if (master == NULL || filename == NULL || position == NULL) {
-			msg("Failed to get master binlog coordinates "
-				"from SHOW SLAVE STATUS\n");
-			msg("This means that the server is not a "
-				"replication slave. Ignoring the --slave-info "
-				"option\n");
-			/* we still want to continue the backup */
-			goto cleanup;
-		}
+  MYSQL_RES *slave_status_res =
+      xb_mysql_query(connection, "SHOW SLAVE STATUS", true, true);
 
-		const char* channel_name = writable_channel_name;
-		if (channel_name && channel_name[0] != '\0') {
-			const char* clause_format = " FOR CHANNEL '%s'";
-			xb_a(channel_info_maxlen >
-				strlen(channel_name) + strlen(clause_format));
-			snprintf(channel_info_buf, channel_info_maxlen,
-				clause_format, channel_name);
-			channel_info = channel_info_buf;
-		} else {
-			channel_name = channel_info = "";
-		}
+  while (read_mysql_variables_from_result(slave_status_res, status, false)) {
+    channel_info_t info;
+    info.master = master;
+    info.auto_position = (strcmp(auto_position, "1") == 0);
+    info.filename = filename;
+    info.position = strtoull(position, NULL, 10);
+    channels[channel_name ? channel_name : ""] = info;
+    free_mysql_variables(status);
+  }
 
-		if (slave_info.capacity() == 0) {
-			slave_info.reserve(4096);
-		}
+  int channel_idx = 0;
+  for (auto &channel : log_status.channels) {
+    auto ch = channels.find(channel.channel_name);
+    std::string for_channel;
 
-		++master_index;
+    if (!channel.channel_name.empty()) {
+      for_channel = " FOR CHANNEL '" + channel.channel_name + "'";
+    }
 
-		/* Print slave status to a file.
-		If GTID mode is used, construct a CHANGE MASTER statement with
-		MASTER_AUTO_POSITION and correct a gtid_purged value. */
-		if (auto_position != NULL && !strcmp(auto_position, "1")) {
-			/* MySQL >= 5.6 with GTID enabled */
-			for (ptr = strchr(gtid_executed, '\n');
-			     ptr;
-			     ptr = strchr(ptr, '\n')) {
-				*ptr = ' ';
-			}
+    if (ch == channels.end()) {
+      msg("xtrabackup: Error: Failed to find information for "
+          "channel '%s' in SHOW SLAVE STATUS output.\n",
+          channel.channel_name.c_str());
+      result = false;
+      goto cleanup;
+    }
 
-			if (master_index == 1) {
-				format_append(slave_info,
-					"SET GLOBAL gtid_purged='%s';\n",
-					gtid_executed);
-			}
-			format_append(slave_info,
-				"CHANGE MASTER TO MASTER_AUTO_POSITION=1%s;\n",
-				channel_info);
+    ++channel_idx;
 
-			format_append(mysql_slave_position,
-				"master host '%s', purge list '%s', "
-				"channel name: '%s'\n",
-				master, gtid_executed, channel_name);
-		} else if (using_gtid && !strcasecmp(using_gtid, "yes")) {
-			/* MariaDB >= 10.0 with GTID enabled */
-			if (master_index == 1) {
-				format_append(slave_info,
-					"SET GLOBAL gtid_slave_pos = '%s';\n",
-					gtid_slave_pos);
-			}
-			format_append(slave_info,
-				"CHANGE MASTER TO master_use_gtid = slave_pos"
-				"%s;\n",
-				channel_info);
-			format_append(mysql_slave_position,
-				"master host '%s', gtid_slave_pos %s, "
-				"channel name: '%s'\n",
-				master, gtid_slave_pos, channel_name);
-		} else {
-			format_append(slave_info,
-				"CHANGE MASTER TO MASTER_LOG_FILE='%s', "
-				"MASTER_LOG_POS=%s%s;\n",
-				filename, position, channel_info);
-			format_append(mysql_slave_position,
-				"master host '%s', filename '%s', "
-				"position '%s', channel name: '%s'\n",
-				master, filename, position,
-				channel_name);
-		}
-		free_mysql_variables(status);
-	}
-	result = backup_file_print(XTRABACKUP_SLAVE_INFO, slave_info.c_str(),
-			  slave_info.size());
+    if (ch->second.auto_position) {
+      if (channel_idx == 1) {
+        slave_info << "SET GLOBAL gtid_purged='" << log_status.gtid_executed
+                   << "';\n";
+      }
+      slave_info << "CHANGE MASTER TO MASTER_AUTO_POSITION=1" << for_channel
+                 << ";\n";
+
+      mysql_slave_position_s << "master host '" << ch->second.master
+                             << "', purge list '" << log_status.gtid_executed
+                             << "', channel name: '" << channel.channel_name
+                             << "'\n";
+    } else {
+      slave_info << "CHANGE MASTER TO MASTER_LOG_FILE='" << ch->second.filename
+                 << "', MASTER_LOG_POS=" << channel.relay_log_position
+                 << for_channel << ";\n";
+
+      mysql_slave_position_s
+          << "master host '" << ch->second.master << "', filename '"
+          << (channel.relay_master_log_file.empty()
+                  ? ch->second.filename
+                  : channel.relay_master_log_file)
+          << "', position '"
+          << (channel.relay_master_log_file.empty()
+                  ? ch->second.position
+                  : channel.exec_master_log_position)
+          << "', channel name: '" << channel.channel_name << "'\n";
+    }
+  }
+
+  mysql_slave_position = mysql_slave_position_s.str();
+
+  result = backup_file_print(XTRABACKUP_SLAVE_INFO, slave_info.str().c_str(),
+                             slave_info.str().size());
 
 cleanup:
 	mysql_free_result(slave_status_res);
 	free_mysql_variables(status);
-	free_mysql_variables(variables);
 
 	return(result);
 }
@@ -1569,8 +1517,6 @@ write_current_binlog_file(MYSQL *connection)
 	if (gtid_exists) {
 		size_t log_bin_dir_length;
 
-		lock_binlog_maybe(connection);
-
 		xb_mysql_query(connection, "FLUSH BINARY LOGS", false);
 
 		read_mysql_variables(connection, "SHOW MASTER STATUS",
@@ -1615,69 +1561,147 @@ cleanup:
 	return(result);
 }
 
+/** Parse replication channels information from JSON.
+@param[in]   s            JSON string
+@param[out]  log_status   replication info */
+static void log_status_replication_parse(const char *s,
+                                         log_status_t &log_status) {
+  using rapidjson::Document;
+  Document doc;
+  doc.Parse(s);
 
-/*********************************************************************//**
-Retrieves MySQL binlog position and
-saves it in a file. It also prints it to stdout. */
-bool
-write_binlog_info(MYSQL *connection)
-{
-	char *filename = NULL;
-	char *position = NULL;
-	char *gtid_mode = NULL;
-	char *gtid_current_pos = NULL;
-	char *gtid_executed = NULL;
-	char *gtid = NULL;
-	bool result;
-	bool mysql_gtid;
-	bool mariadb_gtid;
+  ut_a(!doc.HasParseError());
 
-	mysql_variable status[] = {
-		{"File", &filename},
-		{"Position", &position},
-		{"Executed_Gtid_Set", &gtid_executed},
-		{NULL, NULL}
-	};
+  auto root = doc.GetObject();
 
-	mysql_variable vars[] = {
-		{"gtid_mode", &gtid_mode},
-		{"gtid_current_pos", &gtid_current_pos},
-		{NULL, NULL}
-	};
+  for (auto &ch : root["channels"].GetArray()) {
+    replication_channel_status_t cs;
+    cs.channel_name = ch["channel_name"].GetString();
+    cs.relay_log_file = ch["relay_log_file"].GetString();
+    cs.relay_log_position = ch["relay_log_position"].GetUint64();
+    if (server_flavor == FLAVOR_PERCONA_SERVER) {
+      cs.relay_master_log_file = ch["relay_master_log_file"].GetString();
+      cs.exec_master_log_position = ch["exec_master_log_position"].GetUint64();
+    }
+    log_status.channels.push_back(cs);
+  }
+}
 
-	read_mysql_variables(connection, "SHOW MASTER STATUS", status, false);
-	read_mysql_variables(connection, "SHOW VARIABLES", vars, true);
+/** Parse LSN information from JSON.
+@param[in]   s            JSON string
+@param[out]  log_status   LSN info */
+static void log_status_storage_engines_parse(const char *s,
+                                             log_status_t &log_status) {
+  using rapidjson::Document;
+  Document doc;
+  doc.Parse(s);
 
-	if (filename == NULL || position == NULL) {
-		/* Do not create xtrabackup_binlog_info if binary
-		log is disabled */
-		result = true;
-		goto cleanup;
-	}
+  ut_a(!doc.HasParseError());
 
-	mysql_gtid = ((gtid_mode != NULL) && (strcmp(gtid_mode, "ON") == 0));
-	mariadb_gtid = (gtid_current_pos != NULL);
+  auto root = doc.GetObject();
 
-	gtid = (gtid_executed != NULL ? gtid_executed : gtid_current_pos);
+  auto innodb = root["InnoDB"].GetObject();
+  log_status.lsn = innodb["LSN"].GetUint64();
+  log_status.lsn_checkpoint = innodb["LSN_checkpoint"].GetUint64();
+}
 
-	if (mariadb_gtid || mysql_gtid) {
-		ut_a(asprintf(&mysql_binlog_position,
-			"filename '%s', position '%s', "
-			"GTID of the last change '%s'",
-			filename, position, gtid) != -1);
-		result = backup_file_printf(XTRABACKUP_BINLOG_INFO,
-					    "%s\t%s\t%s\n", filename, position,
-					    gtid);
-	} else {
-		ut_a(asprintf(&mysql_binlog_position,
-			"filename '%s', position '%s'",
-			filename, position) != -1);
-		result = backup_file_printf(XTRABACKUP_BINLOG_INFO,
-					    "%s\t%s\n", filename, position);
-	}
+/** Parse binaty log position from JSON.
+@param[in]   s            JSON string
+@param[out]  log_status   binary log info */
+static void log_status_local_parse(const char *s, log_status_t &log_status) {
+  using rapidjson::Document;
+  Document doc;
+  doc.Parse(s);
+
+  ut_a(!doc.HasParseError());
+
+  auto root = doc.GetObject();
+
+  if (root.HasMember("gtid_executed")) {
+    log_status.gtid_executed = root["gtid_executed"].GetString();
+    /* replace newlines in gtid */
+    std::string::size_type pos = 0;
+    while ((pos = log_status.gtid_executed.find("\n", pos)) !=
+           std::string::npos) {
+      log_status.gtid_executed.erase(pos, 1);
+    }
+  }
+  if (root.HasMember("binary_log_file")) {
+    log_status.filename = root["binary_log_file"].GetString();
+  }
+  if (root.HasMember("binary_log_position")) {
+    log_status.position = root["binary_log_position"].GetUint64();
+  }
+}
+
+/** Read binaty log position and InnoDB LSN from p_s.log_status.
+@param[in]   conn         mysql connection handle */
+void log_status_get(MYSQL *conn) {
+  msg_ts("Selecting LSN and binary log position from p_s.log_status\n");
+
+  const char *query =
+      "SELECT server_uuid, local, replication, "
+      "storage_engines FROM performance_schema.log_status";
+  MYSQL_RES *result = xb_mysql_query(conn, query, true, true);
+  MYSQL_ROW row;
+  if ((row = mysql_fetch_row(result))) {
+    const char *local = row[1];
+    const char *replication = row[2];
+    const char *storage_engines = row[3];
+
+    log_status_local_parse(local, log_status);
+    log_status_storage_engines_parse(storage_engines, log_status);
+    log_status_replication_parse(replication, log_status);
+  }
+  mysql_free_result(result);
+}
+
+/*********************************************************************/ /**
+ Retrieves MySQL binlog position and
+ saves it in a file. It also prints it to stdout.
+ @param[in]   connection  MySQL connection handler
+ @param[out]  lsn         InnoDB's current LN
+ @return true if success. */
+bool write_binlog_info(MYSQL *connection, lsn_t &lsn) {
+  std::ostringstream s;
+  char *gtid_mode = NULL;
+  bool result, gtid;
+
+  mysql_variable vars[] = {{"gtid_mode", &gtid_mode}, {NULL, NULL}};
+  read_mysql_variables(connection, "SHOW VARIABLES", vars, true);
+
+  lsn = log_status.lsn;
+
+  if (log_status.filename.empty() && log_status.gtid_executed.empty()) {
+    /* Do not create xtrabackup_binlog_info if binary
+    log is disabled */
+    result = true;
+    goto cleanup;
+  }
+
+  s << "filename '" << log_status.filename << "', position '"
+    << log_status.position << "'";
+
+  gtid = ((gtid_mode != NULL) && (strcmp(gtid_mode, "ON") == 0));
+
+  if (!log_status.gtid_executed.empty() && gtid) {
+    s << ", GTID of the last change '" << log_status.gtid_executed << "'";
+  }
+
+  mysql_binlog_position = s.str();
+
+  if (!log_status.gtid_executed.empty() && gtid) {
+    result =
+        backup_file_printf(XTRABACKUP_BINLOG_INFO, "%s\t" UINT64PF "\t%s\n",
+                           log_status.filename.c_str(), log_status.position,
+                           log_status.gtid_executed.c_str());
+  } else {
+    result =
+        backup_file_printf(XTRABACKUP_BINLOG_INFO, "%s\t" UINT64PF "\n",
+                           log_status.filename.c_str(), log_status.position);
+  }
 
 cleanup:
-	free_mysql_variables(status);
 	free_mysql_variables(vars);
 
 	return(result);
@@ -1711,51 +1735,53 @@ char* get_xtrabackup_info(MYSQL *connection)
 	ut_a(uuid);
 	ut_a(server_version);
 	char* result = NULL;
-	int ret = asprintf(&result,
-		"uuid = %s\n"
-		"name = %s\n"
-		"tool_name = %s\n"
-		"tool_command = %s\n"
-		"tool_version = %s\n"
-		"ibbackup_version = %s\n"
-		"server_version = %s\n"
-		"start_time = %s\n"
-		"end_time = %s\n"
-		"lock_time = %ld\n"
-		"binlog_pos = %s\n"
-		"innodb_from_lsn = " LSN_PF "\n"
-		"innodb_to_lsn = " LSN_PF "\n"
-		"partial = %s\n"
-		"incremental = %s\n"
-		"format = %s\n"
-		"compressed = %s\n"
-		"encrypted = %s\n",
-		uuid, /* uuid */
-		opt_history ? opt_history : "",  /* name */
-		tool_name,  /* tool_name */
-		tool_args,  /* tool_command */
-		XTRABACKUP_VERSION,  /* tool_version */
-		XTRABACKUP_VERSION,  /* ibbackup_version */
-		server_version,  /* server_version */
-		buf_start_time,  /* start_time */
-		buf_end_time,  /* end_time */
-		(long int)history_lock_time, /* lock_time */
-		mysql_binlog_position ?
-			mysql_binlog_position : "", /* binlog_pos */
-		incremental_lsn, /* innodb_from_lsn */
-		metadata_to_lsn, /* innodb_to_lsn */
-		(xtrabackup_tables /* partial */
-		 || xtrabackup_tables_exclude
-		 || xtrabackup_tables_file
-		 || xtrabackup_databases
-		 || xtrabackup_databases_exclude
-		 || xtrabackup_databases_file) ? "Y" : "N",
-		xtrabackup_incremental ? "Y" : "N", /* incremental */
-		xb_stream_format_name[xtrabackup_stream_fmt], /* format */
-		xtrabackup_compress ? "compressed" : "N", /* compressed */
-		xtrabackup_encrypt ? "Y" : "N"); /* encrypted */
+        int ret =
+            asprintf(&result,
+                     "uuid = %s\n"
+                     "name = %s\n"
+                     "tool_name = %s\n"
+                     "tool_command = %s\n"
+                     "tool_version = %s\n"
+                     "ibbackup_version = %s\n"
+                     "server_version = %s\n"
+                     "start_time = %s\n"
+                     "end_time = %s\n"
+                     "lock_time = %ld\n"
+                     "binlog_pos = %s\n"
+                     "innodb_from_lsn = " LSN_PF
+                     "\n"
+                     "innodb_to_lsn = " LSN_PF
+                     "\n"
+                     "partial = %s\n"
+                     "incremental = %s\n"
+                     "format = %s\n"
+                     "compressed = %s\n"
+                     "encrypted = %s\n",
+                     uuid,                           /* uuid */
+                     opt_history ? opt_history : "", /* name */
+                     tool_name,                      /* tool_name */
+                     tool_args,                      /* tool_command */
+                     XTRABACKUP_VERSION,             /* tool_version */
+                     XTRABACKUP_VERSION,             /* ibbackup_version */
+                     server_version,                 /* server_version */
+                     buf_start_time,                 /* start_time */
+                     buf_end_time,                   /* end_time */
+                     (long int)history_lock_time,    /* lock_time */
+                     mysql_binlog_position.c_str(),  /* binlog_pos */
+                     incremental_lsn,                /* innodb_from_lsn */
+                     metadata_to_lsn,                /* innodb_to_lsn */
+                     (xtrabackup_tables              /* partial */
+                      || xtrabackup_tables_exclude || xtrabackup_tables_file ||
+                      xtrabackup_databases || xtrabackup_databases_exclude ||
+                      xtrabackup_databases_file)
+                         ? "Y"
+                         : "N",
+                     xtrabackup_incremental ? "Y" : "N", /* incremental */
+                     xb_stream_format_name[xtrabackup_stream_fmt], /* format */
+                     xtrabackup_compress ? "compressed" : "N", /* compressed */
+                     xtrabackup_encrypt ? "Y" : "N");          /* encrypted */
 
-	ut_a(ret != 0);
+        ut_a(ret != 0);
 
 	free(server_version);
 	return result;
@@ -1900,13 +1926,13 @@ write_xtrabackup_info(MYSQL *connection)
 
 	/* binlog_pos */
 	bind[idx].buffer_type = MYSQL_TYPE_STRING;
-	bind[idx].buffer = mysql_binlog_position;
-	if (mysql_binlog_position != NULL) {
-		bind[idx].buffer_length = strlen(mysql_binlog_position);
-	} else {
-		bind[idx].is_null = &null;
-	}
-	++idx;
+        bind[idx].buffer = (void *)mysql_binlog_position.c_str();
+        if (!mysql_binlog_position.empty()) {
+          bind[idx].buffer_length = mysql_binlog_position.length();
+        } else {
+          bind[idx].is_null = &null;
+        }
+        ++idx;
 
 	/* innodb_from_lsn */
 	bind[idx].buffer_type = MYSQL_TYPE_LONGLONG;
@@ -2099,7 +2125,6 @@ Deallocate memory, disconnect from MySQL server, etc.
 void
 backup_cleanup()
 {
-	free(mysql_binlog_position);
 	free(buffer_pool_filename);
 	free(backup_uuid);
 	backup_uuid = NULL;
@@ -2171,10 +2196,10 @@ mdl_lock_table(ulint space_id)
 void
 mdl_unlock_all()
 {
-	msg_ts("Unlocking MDL for all tables");
+  msg_ts("Unlocking MDL for all tables\n");
 
-	xb_mysql_query(mdl_con, "COMMIT", false, true);
+  xb_mysql_query(mdl_con, "COMMIT", false, true);
 
-	mutex_free(&mdl_lock_con_mutex);
+  mutex_free(&mdl_lock_con_mutex);
 }
 
