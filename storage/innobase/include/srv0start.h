@@ -88,9 +88,10 @@ referenced by the TRX_SYS page.
 dberr_t srv_undo_tablespaces_upgrade();
 
 /** Start InnoDB.
-@param[in]	create_new_db		Whether to create a new database
+@param[in]  create_new_db     Whether to create a new database
+@param[in]  to_lsn            LSN to stop recovery at
 @return DB_SUCCESS or error code */
-[[nodiscard]] dberr_t srv_start(bool create_new_db);
+[[nodiscard]] dberr_t srv_start(bool create_new_db, lsn_t to_lsn);
 
 /** Fix up an undo tablespace if it was in the process of being truncated
 when the server crashed. This is the second call and is done after the DD
