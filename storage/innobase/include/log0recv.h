@@ -207,12 +207,14 @@ bool recv_page_is_brand_new(buf_block_t *block);
 
 /** Start recovering from a redo log checkpoint.
 @see recv_recovery_from_checkpoint_finish
-@param[in,out]	log		redo log
-@param[in]	flush_lsn	FIL_PAGE_FILE_FLUSH_LSN
+@param[in,out]  log   redo log
+@param[in]  flush_lsn FIL_PAGE_FILE_FLUSH_LSN
                                 of first system tablespace page
+@param[in]  to_lsn    LSN to store recovery at
 @return error code or DB_SUCCESS */
 [[nodiscard]] dberr_t recv_recovery_from_checkpoint_start(log_t &log,
-                                                          lsn_t flush_lsn);
+                                                          lsn_t flush_lsn,
+                                                          lsn_t to_lsn);
 
 /** Complete the recovery from the latest checkpoint.
 @param[in,out]	log		redo log

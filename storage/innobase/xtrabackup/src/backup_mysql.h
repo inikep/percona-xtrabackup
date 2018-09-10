@@ -4,6 +4,8 @@
 #include <mysql.h>
 #include <string>
 
+#include "xtrabackup.h"
+
 /* mysql flavor and version */
 enum mysql_flavor_t {
   FLAVOR_UNKNOWN,
@@ -30,7 +32,7 @@ extern time_t history_lock_time;
 
 extern bool sql_thread_started;
 extern std::string mysql_slave_position;
-extern char *mysql_binlog_position;
+extern std::string mysql_binlog_position;
 extern char *buffer_pool_filename;
 
 /** connection to mysql server */
@@ -62,7 +64,17 @@ void unlock_all(MYSQL *connection);
 
 bool write_current_binlog_file(MYSQL *connection);
 
-bool write_binlog_info(MYSQL *connection);
+/** Read binaty log position and InnoDB LSN from p_s.log_status.
+@param[in]   conn         mysql connection handle */
+void log_status_get(MYSQL *conn);
+
+/*********************************************************************/ /**
+ Retrieves MySQL binlog position and
+ saves it in a file. It also prints it to stdout.
+ @param[in]   connection  MySQL connection handler
+ @param[out]  lsn         InnoDB's current LN
+ @return true if success. */
+bool write_binlog_info(MYSQL *connection, lsn_t &lsn);
 
 char *get_xtrabackup_info(MYSQL *connection);
 
@@ -71,7 +83,6 @@ bool write_xtrabackup_info(MYSQL *connection);
 bool write_backup_config_file();
 
 bool lock_binlog_maybe(MYSQL *connection);
-
 bool lock_tables_for_backup(MYSQL *connection, int timeout = 31536000);
 
 bool lock_tables_maybe(MYSQL *connection);
