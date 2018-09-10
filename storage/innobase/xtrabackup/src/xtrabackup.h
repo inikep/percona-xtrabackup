@@ -182,8 +182,6 @@ enum binlog_info_enum {
   BINLOG_INFO_AUTO
 };
 
-extern ulong opt_binlog_info;
-
 void xtrabackup_io_throttling(void);
 bool xb_write_delta_metadata(const char *filename, const xb_delta_info_t *info);
 
