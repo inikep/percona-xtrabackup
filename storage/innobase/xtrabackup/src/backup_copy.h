@@ -25,8 +25,15 @@ Copy file for backup/restore.
 bool copy_file(ds_ctxt_t *datasink, const char *src_file_path,
                const char *dst_file_path, uint thread_n);
 
-bool backup_start();
+/* Backup non-InnoDB data.
+@param  backup_lsn   backup LSN
+@return true if success. */
+bool backup_start(lsn_t &backup_lsn);
+
+/* Finsh the backup. Release all locks. Write down backup metadata.
+@return true if success. */
 bool backup_finish();
+
 bool apply_log_finish();
 bool copy_back(int argc, char **argv);
 bool decrypt_decompress();
