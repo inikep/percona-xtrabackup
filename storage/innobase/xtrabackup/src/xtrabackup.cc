@@ -159,6 +159,7 @@ long xtrabackup_throttle = 0; /* 0:unlimited */
 lint io_ticket;
 os_event_t wait_throttle = NULL;
 os_event_t log_copying_stop = NULL;
+lsn_t log_copying_stop_lsn = 0;
 
 char *xtrabackup_incremental = NULL;
 lsn_t incremental_lsn;
@@ -354,6 +355,8 @@ static long innobase_log_files_in_group_save;
 static char *srv_log_group_home_dir_save;
 static longlong innobase_log_file_size_save;
 
+static char *srv_temp_dir = nullptr;
+
 /* set true if corresponding variable set as option config file or
 command argument */
 bool innodb_log_checksums_specified = false;
@@ -390,12 +393,6 @@ bool opt_decompress = false;
 bool opt_remove_original = false;
 bool opt_tables_compatibility_check = true;
 static bool opt_check_privileges = false;
-
-static const char *binlog_info_values[] = {"off", "lockless", "on", "auto",
-                                           NullS};
-static TYPELIB binlog_info_typelib = {array_elements(binlog_info_values) - 1,
-                                      "", binlog_info_values, NULL};
-ulong opt_binlog_info;
 
 char *opt_incremental_history_name = NULL;
 char *opt_incremental_history_uuid = NULL;
@@ -470,9 +467,6 @@ extern struct rand_struct sql_rand;
 extern mysql_mutex_t LOCK_sql_rand;
 
 static void check_all_privileges();
-
-/* Whether xtrabackup_binlog_info should be created on recovery */
-static bool recover_binlog_info;
 
 #define CLIENT_WARN_DEPRECATED(opt, new_opt)                     \
   msg("WARNING: " opt                                            \
@@ -622,6 +616,7 @@ enum options_xtrabackup {
   OPT_XTRA_REBUILD_THREADS,
   OPT_INNODB_CHECKSUM_ALGORITHM,
   OPT_INNODB_UNDO_DIRECTORY,
+  OPT_INNODB_TEMP_TABLESPACE_DIRECTORY,
   OPT_INNODB_UNDO_TABLESPACES,
   OPT_INNODB_LOG_CHECKSUMS,
   OPT_XTRA_INCREMENTAL_FORCE_SCAN,
@@ -656,7 +651,6 @@ enum options_xtrabackup {
   OPT_LOCK_WAIT_THRESHOLD,
   OPT_DEBUG_SLEEP_BEFORE_UNLOCK,
   OPT_SAFE_SLAVE_BACKUP_TIMEOUT,
-  OPT_BINLOG_INFO,
   OPT_XB_SECURE_AUTH,
   OPT_TRANSITION_KEY,
   OPT_GENERATE_TRANSITION_KEY,
@@ -674,6 +668,7 @@ enum options_xtrabackup {
   OPT_TLS_VERSION,
   OPT_SSL_MODE,
   OPT_SSL_FIPS_MODE,
+  OPT_TLS_CIPHERSUITES,
   OPT_SSL_SESSION_DATA,
   OPT_SSL_SESSION_DATA_CONTINUE_ON_FAILED_REUSE,
   OPT_SERVER_PUBLIC_KEY,
@@ -1139,13 +1134,6 @@ struct my_option xb_client_options[] = {
      (uchar *)&opt_safe_slave_backup_timeout, 0, GET_UINT, REQUIRED_ARG, 300, 0,
      0, 0, 0, 0},
 
-    {"binlog-info", OPT_BINLOG_INFO,
-     "This option controls how XtraBackup should retrieve server's binary log "
-     "coordinates corresponding to the backup. Possible values are OFF, ON, "
-     "LOCKLESS and AUTO. See the XtraBackup manual for more information",
-     &opt_binlog_info, &opt_binlog_info, &binlog_info_typelib, GET_ENUM,
-     OPT_ARG, BINLOG_INFO_AUTO, 0, 0, 0, 0, 0},
-
     {"check-privileges", OPT_XTRA_CHECK_PRIVILEGES,
      "Check database user "
      "privileges before performing any query.",
@@ -1347,6 +1335,10 @@ Disable with --skip-innodb-doublewrite.",
     {"innodb_undo_directory", OPT_INNODB_UNDO_DIRECTORY,
      "Directory where undo tablespace files live, this path can be absolute.",
      &srv_undo_dir, &srv_undo_dir, 0, GET_STR_ALLOC, REQUIRED_ARG, 0, 0, 0, 0,
+     0, 0},
+    {"temp_tablespaces_dir", OPT_INNODB_TEMP_TABLESPACE_DIRECTORY,
+     "Directory where temp tablespace files live, this path can be absolute.",
+     &srv_temp_dir, &srv_temp_dir, 0, GET_STR_ALLOC, REQUIRED_ARG, 0, 0, 0, 0,
      0, 0},
 
     {"innodb_undo_tablespaces", OPT_INNODB_UNDO_TABLESPACES,
@@ -2019,6 +2011,16 @@ static bool innodb_init_param(void) {
     srv_undo_dir = my_strdup(PSI_NOT_INSTRUMENTED, ".", MYF(MY_FAE));
   }
 
+  /* We want to save original value of srv_temp_dir because InnoDB will
+  modify ibt::srv_temp_dir. */
+  ibt::srv_temp_dir = srv_temp_dir;
+
+  if (ibt::srv_temp_dir == nullptr) {
+    ibt::srv_temp_dir = default_path;
+  }
+
+  Fil_path::normalize(ibt::srv_temp_dir);
+
   return (false);
 
 error:
@@ -2031,7 +2033,7 @@ dberr_t xb_load_single_table_tablespaces(load_table_predicate_t pred);
 
 dberr_t dict_load_tables_from_space_id(space_id_t space_id, THD *thd,
                                        ib_trx_t trx) {
-  dd::sdi_vector sdi_vector;
+  sdi_vector_t sdi_vector;
   ib_sdi_vector_t ib_vector;
   ib_vector.sdi_vector = &sdi_vector;
 
@@ -2052,7 +2054,7 @@ dberr_t dict_load_tables_from_space_id(space_id_t space_id, THD *thd,
     goto error;
   }
 
-  for (dd::sdi_container::iterator it = ib_vector.sdi_vector->m_vec.begin();
+  for (sdi_container::iterator it = ib_vector.sdi_vector->m_vec.begin();
        it != ib_vector.sdi_vector->m_vec.end(); it++) {
     ib_sdi_key_t ib_key;
     ib_key.sdi_key = &(*it);
@@ -2185,7 +2187,13 @@ static bool innodb_init(bool init_dd) {
   directories.push_back(FIL_PATH_SEPARATOR);
   directories.append(MySQL_datadir_path.path());
 
-  err = srv_start(false, directories);
+  lsn_t to_lsn = ULLONG_MAX;
+  if (!init_dd && xtrabackup_prepare) {
+    to_lsn = (xtrabackup_incremental_dir == nullptr) ? metadata_last_lsn
+                                                     : incremental_last_lsn;
+  }
+
+  err = srv_start(false, directories, to_lsn);
 
   if (err != DB_SUCCESS) {
     free(internal_innobase_data_file_path);
@@ -2249,7 +2257,6 @@ Read backup meta info.
 static bool xtrabackup_read_metadata(char *filename) {
   FILE *fp;
   bool r = true;
-  int t;
 
   fp = fopen(filename, "r");
   if (!fp) {
@@ -2275,9 +2282,6 @@ static bool xtrabackup_read_metadata(char *filename) {
     metadata_last_lsn = 0;
   }
 
-  if (fscanf(fp, "recover_binlog_info = %d\n", &t) == 1) {
-    recover_binlog_info = (t == 1);
-  }
 end:
   fclose(fp);
 
@@ -2295,11 +2299,9 @@ static void xtrabackup_print_metadata(char *buf, size_t buf_len) {
            "\n"
            "to_lsn = " UINT64PF
            "\n"
-           "last_lsn = " UINT64PF
-           "\n"
-           "recover_binlog_info = %d\n",
-           metadata_type, metadata_from_lsn, metadata_to_lsn, metadata_last_lsn,
-           MY_TEST(opt_binlog_info == BINLOG_INFO_LOCKLESS));
+           "last_lsn = " UINT64PF "\n",
+           metadata_type, metadata_from_lsn, metadata_to_lsn,
+           metadata_last_lsn);
 }
 
 /***********************************************************************
@@ -2919,7 +2921,7 @@ static bool xtrabackup_scan_log_recs(
     if (no != scanned_no && checksum_is_ok) {
       ulint blocks_in_group;
 
-      blocks_in_group = log_block_convert_lsn_to_no(log_get_capacity()) - 1;
+      blocks_in_group = log_block_convert_lsn_to_no(log.lsn_real_capacity) - 1;
 
       if ((no < scanned_no && ((scanned_no - no) % blocks_in_group) == 0) ||
           no == 0 ||
@@ -3013,7 +3015,7 @@ static bool xtrabackup_scan_log_recs(
         recv_sys->found_corrupt_log = true;
 
       } else if (!recv_sys->found_corrupt_log) {
-        more_data = recv_sys_add_to_parsing_buf(log_block, scanned_lsn);
+        more_data = recv_sys_add_to_parsing_buf(log_block, scanned_lsn, 0);
       }
 
       recv_sys->scanned_lsn = scanned_lsn;
@@ -3140,19 +3142,17 @@ static void log_copying_thread() {
 
   log_copying_running = true;
 
-  while (log_copying) {
+  while (log_copying || log_copy_scanned_lsn < log_copying_stop_lsn) {
     os_event_reset(log_copying_stop);
     os_event_wait_time_low(log_copying_stop,
                            xtrabackup_log_copy_interval * 1000ULL, 0);
-    if (log_copying) {
-      if (xtrabackup_copy_logfile(*log_sys, log_copy_scanned_lsn, false)) {
-        exit(EXIT_FAILURE);
-      }
+    if (xtrabackup_copy_logfile(*log_sys, log_copy_scanned_lsn, false)) {
+      exit(EXIT_FAILURE);
     }
   }
 
   /* last copying */
-  if (xtrabackup_copy_logfile(*log_sys, log_copy_scanned_lsn, TRUE)) {
+  if (xtrabackup_copy_logfile(*log_sys, log_copy_scanned_lsn, true)) {
     exit(EXIT_FAILURE);
   }
 
@@ -3582,7 +3582,7 @@ static ulint xb_load_tablespaces(void)
   lsn_t flush_lsn;
 
   for (ulint i = 0; i < srv_n_file_io_threads; i++) {
-    os_thread_create(PFS_NOT_INSTRUMENTED, io_handler_thread, i);
+    os_thread_create(PFS_NOT_INSTRUMENTED, i, io_handler_thread, i).start();
   }
 
   std::this_thread::sleep_for(std::chrono::milliseconds(200));
@@ -3666,7 +3666,7 @@ void xb_data_files_close(void)
   to the signaled state. Then the threads will exit themselves after
   os_event_wait(). */
   for (i = 0; i < 1000; i++) {
-    if (!buf_page_cleaner_is_active && os_aio_all_slots_free()) {
+    if (!buf_flush_page_cleaner_is_active() && os_aio_all_slots_free()) {
       os_aio_wake_all_threads_at_shutdown();
     }
 
@@ -4159,16 +4159,14 @@ Prints a warning for every table that uses unsupported engine and
 hence will not be backed up. */
 static void xb_tables_compatibility_check() {
   const char *query =
-      "SELECT\n"
-      "  CONCAT(table_schema, '/', table_name), engine\n"
-      "FROM information_schema.tables\n"
-      "WHERE engine NOT IN (\n"
-      "  'MyISAM', 'InnoDB', 'CSV', 'MRG_MYISAM'\n"
-      ")\n"
-      "AND table_schema NOT IN (\n"
-      "  'performance_schema', 'information_schema',"
-      "  'mysql'\n"
-      ");";
+      "SELECT"
+      "  CONCAT(table_schema, '/', table_name), engine "
+      "FROM information_schema.tables "
+      "WHERE engine NOT IN ("
+      "'MyISAM', 'InnoDB', 'CSV', 'MRG_MYISAM') "
+      "AND table_schema NOT IN ("
+      "  'performance_schema', 'information_schema', "
+      "  'mysql');";
 
   MYSQL_RES *result = xb_mysql_query(mysql_connection, query, true, true);
   MYSQL_ROW row;
@@ -4246,6 +4244,7 @@ void xtrabackup_backup_func(void) {
   uint count;
   ib_mutex_t count_mutex;
   data_thread_ctxt_t *data_threads;
+  lsn_t backup_lsn = 0;
 
   recv_is_making_a_backup = true;
 
@@ -4527,7 +4526,7 @@ void xtrabackup_backup_func(void) {
       io_ticket = xtrabackup_throttle;
       wait_throttle = os_event_create("wait_throttle");
 
-      os_thread_create(PFS_NOT_INSTRUMENTED, io_watching_thread);
+      os_thread_create(PFS_NOT_INSTRUMENTED, io_watching_thread).start();
     }
 
     /* copy log file by current position */
@@ -4535,7 +4534,7 @@ void xtrabackup_backup_func(void) {
       exit(EXIT_FAILURE);
 
     log_copying_stop = os_event_create("log_copying_stop");
-    os_thread_create(PFS_NOT_INSTRUMENTED, log_copying_thread);
+    os_thread_create(PFS_NOT_INSTRUMENTED, log_copying_thread).start();
 
     Tablespace_map::instance().scan(mysql_connection);
 
@@ -4598,7 +4597,8 @@ void xtrabackup_backup_func(void) {
       data_threads[i].count = &count;
       data_threads[i].count_mutex = &count_mutex;
       os_thread_create(PFS_NOT_INSTRUMENTED, data_copy_thread_func,
-                       data_threads + i);
+                       data_threads + i)
+          .start();
     }
 
     /* Wait for threads to exit */
@@ -4621,7 +4621,7 @@ void xtrabackup_backup_func(void) {
     }
   }
 
-  if (!backup_start()) {
+  if (!backup_start(backup_lsn)) {
     exit(EXIT_FAILURE);
   }
 
@@ -4649,8 +4649,10 @@ void xtrabackup_backup_func(void) {
 skip_last_cp:
   /* stop log_copying_thread */
   log_copying = FALSE;
+  log_copying_stop_lsn = backup_lsn;
   os_event_set(log_copying_stop);
-  msg("xtrabackup: Stopping log copying thread.\n");
+  msg("xtrabackup: Stopping log copying thread at LSN " LSN_PF ".\n",
+      backup_lsn);
   while (log_copying_running) {
     msg(".");
     os_thread_sleep(200000); /*0.2 sec*/
@@ -4670,7 +4672,7 @@ skip_last_cp:
     metadata_from_lsn = incremental_lsn;
   }
   metadata_to_lsn = latest_cp;
-  metadata_last_lsn = log_copy_scanned_lsn;
+  metadata_last_lsn = log_copying_stop_lsn;
 
   if (!xtrabackup_stream_metadata(ds_meta)) {
     msg("xtrabackup: Error: failed to stream metadata.\n");
@@ -4980,7 +4982,7 @@ static void stat_with_rec(dict_table_t *table, THD *thd,
 
       index = UT_LIST_GET_FIRST(table->indexes);
       while (index != NULL) {
-        ib_uint64_t n_vals;
+        uint64_t n_vals;
         bool found;
 
         if (index->n_user_defined_cols > 0) {
@@ -5009,10 +5011,10 @@ static void stat_with_rec(dict_table_t *table, THD *thd,
 
           mtr_start(&local_mtr);
 
-          mtr_x_lock(&(index->lock), &local_mtr);
+          mtr_x_lock(&(index->lock), &local_mtr, UT_LOCATION_HERE);
 
           root = btr_root_get(index, &local_mtr);
-          page_level = btr_page_get_level(root, &local_mtr);
+          page_level = btr_page_get_level(root);
 
           xtrabackup_stats_level(index, page_level);
 
@@ -5602,7 +5604,7 @@ static bool xb_space_create_file(
 
   if (!page_size.is_compressed()) {
     buf_flush_init_for_writing(NULL, page, NULL, 0,
-                               fsp_is_checksum_disabled(space_id));
+                               fsp_is_checksum_disabled(space_id), true);
     success = os_file_write(write_request, path, *file, page, 0,
                             page_size.physical());
   } else {
@@ -5616,7 +5618,7 @@ static bool xb_space_create_file(
         page_zip.m_end = (page_zip.m_nonempty = (page_zip.n_blobs = 0));
 
     buf_flush_init_for_writing(NULL, page, &page_zip, 0,
-                               fsp_is_checksum_disabled(space_id));
+                               fsp_is_checksum_disabled(space_id), true);
     success = os_file_write(write_request, path, *file, page_zip.data, 0,
                             page_size.physical());
   }
@@ -6696,7 +6698,7 @@ static bool xb_export_cfg_write(
   char name[OS_FILE_MAX_PATH];
 
   /* If table is not encrypted, return. */
-  if (!dict_table_is_encrypted(table)) {
+  if (!dd_is_table_in_encrypted_tablespace(table)) {
     return (DB_SUCCESS);
   }
 
@@ -6766,20 +6768,28 @@ static void innodb_free_param() {
   free(internal_innobase_data_file_path);
   internal_innobase_data_file_path = NULL;
   free_tmpdir(&mysql_tmpdir_list);
+  ibt::srv_temp_dir = srv_temp_dir;
 }
 
 /**************************************************************************
-Store the current binary log coordinates in a specified file.
+Store the current binary log coordinates in a specified file and print them
+out to the stderr.
+@param[in]  filename   output file name
 @return 'false' on error. */
-static bool store_binlog_info(
-    /*==============*/
-    const char *filename) /*!< in: output file name */
-{
+static bool store_binlog_info(const char *filename) {
   FILE *fp;
+  char binlog_file[TRX_SYS_MYSQL_LOG_NAME_LEN + 1];
+  uint64_t binlog_offset;
 
-  if (trx_sys_mysql_bin_log_name[0] == '\0') {
+  trx_sys_read_binlog_position(&binlog_file[0], binlog_offset);
+
+  if (binlog_file[0] == '\0') {
     return (true);
   }
+
+  msg("xtrabackup: Last MySQL binlog file position " UINT64PF
+      ", file name %s\n",
+      binlog_offset, binlog_file);
 
   fp = fopen(filename, "w");
 
@@ -6788,8 +6798,7 @@ static bool store_binlog_info(
     return (false);
   }
 
-  fprintf(fp, "%s\t" UINT64PF "\n", trx_sys_mysql_bin_log_name,
-          trx_sys_mysql_bin_log_pos);
+  fprintf(fp, "%s\t" UINT64PF "\n", binlog_file, binlog_offset);
   fclose(fp);
 
   return (true);
@@ -7101,16 +7110,11 @@ skip_check:
     my_thread_end();
   }
 
-  /* print the binary log position  */
-  trx_sys_print_mysql_binlog_offset();
-  msg("\n");
-
   /* output to xtrabackup_binlog_pos_innodb and (if
   backup_safe_binlog_info was available on the server) to
   xtrabackup_binlog_info. In the latter case xtrabackup_binlog_pos_innodb
   becomes redundant and is created only for compatibility. */
-  if (!store_binlog_info("xtrabackup_binlog_pos_innodb") ||
-      (recover_binlog_info && !store_binlog_info(XTRABACKUP_BINLOG_INFO))) {
+  if (!store_binlog_info("xtrabackup_binlog_pos_innodb")) {
     exit(EXIT_FAILURE);
   }
 
@@ -7466,6 +7470,11 @@ static void check_all_privileges() {
   int check_result = PRIVILEGE_OK;
   bool reload_checked = false;
 
+  /* SELECT FROM P_S.LOG_STATUS */
+  check_result |= check_privilege(granted_privileges, "BACKUP_ADMIN", "*", "*");
+  check_result |= check_privilege(granted_privileges, "SELECT",
+                                  "PERFORMANCE_SCHEMA", "LOG_STATUS");
+
   /* SHOW DATABASES */
   check_result |=
       check_privilege(granted_privileges, "SHOW DATABASES", "*", "*");
@@ -7509,8 +7518,7 @@ static void check_all_privileges() {
   if (!opt_no_lock
       /* LOCK TABLES FOR BACKUP */
       /* UNLOCK TABLES */
-      && ((have_backup_locks && !opt_no_lock) || opt_slave_info ||
-          opt_binlog_info == BINLOG_INFO_ON)) {
+      && ((have_backup_locks && !opt_no_lock) || opt_slave_info)) {
     check_result |=
         check_privilege(granted_privileges, "LOCK TABLES", "*", "*");
   }
@@ -7559,7 +7567,7 @@ void handle_options(int argc, char **argv, int *argc_client,
   int ho_error;
   char conf_file[FN_REFLEN];
 
-  char *target_dir = NULL;
+  const char *target_dir = NULL;
   bool prepare = false;
 
   *argc_client = argc;
@@ -7569,7 +7577,7 @@ void handle_options(int argc, char **argv, int *argc_client,
 
   /* scan options for group and config file to load defaults from */
   for (i = 1; i < argc; i++) {
-    char *optend = strcend(argv[i], '=');
+    const char *optend = strcend(argv[i], '=');
 
     if (strncmp(argv[i], "--defaults-group", optend - argv[i]) == 0) {
       defaults_group = optend + 1;
@@ -7626,7 +7634,7 @@ void handle_options(int argc, char **argv, int *argc_client,
   /* Throw a descriptive error if --defaults-file or --defaults-extra-file
   is not the first command line argument */
   for (int i = 2; i < argc; i++) {
-    char *optend = strcend((argv)[i], '=');
+    const char *optend = strcend((argv)[i], '=');
 
     if (optend - argv[i] == 15 &&
         !strncmp(argv[i], "--defaults-file", optend - argv[i])) {
@@ -7730,6 +7738,7 @@ int main(int argc, char **argv) {
   handle_options(argc, argv, &client_argc, &client_defaults, &server_argc,
                  &server_defaults);
 
+  print_version();
   xb_libgcrypt_init();
 
   if ((!xtrabackup_print_param) && (!xtrabackup_prepare) &&
@@ -7855,7 +7864,6 @@ int main(int argc, char **argv) {
     exit(EXIT_SUCCESS);
   }
 
-  print_version();
   if (xtrabackup_incremental) {
     msg("incremental backup from " LSN_PF " is enabled.\n", incremental_lsn);
   }
