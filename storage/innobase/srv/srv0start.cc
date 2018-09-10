@@ -1885,7 +1885,11 @@ static lsn_t srv_prepare_to_delete_redo_log_files(ulint n_files) {
   return (flushed_lsn);
 }
 
-dberr_t srv_start(bool create_new_db) {
+/** Start InnoDB.
+@param[in]  create_new_db     Whether to create a new database
+@param[in]  to_lsn            LSN to stop recovery at
+@return DB_SUCCESS or error code */
+dberr_t srv_start(bool create_new_db, lsn_t to_lsn) {
   lsn_t flushed_lsn;
 
   /* just for assertions */
@@ -2478,7 +2482,7 @@ files_checked:
     /* We always try to do a recovery, even if the database had
     been shut down normally: this is the normal startup path */
 
-    err = recv_recovery_from_checkpoint_start(*log_sys, flushed_lsn);
+    err = recv_recovery_from_checkpoint_start(*log_sys, flushed_lsn, to_lsn);
 
     arch_page_sys->post_recovery_init();
 
