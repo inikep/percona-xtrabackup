@@ -5454,7 +5454,7 @@ static int innobase_init_files(dict_init_mode_t dict_init_mode,
   srv_is_upgrade_mode = (dict_init_mode == DICT_INIT_UPGRADE_57_FILES);
 
   /* Start the InnoDB server. */
-  err = srv_start(create);
+  err = srv_start(create, ULLONG_MAX);
 
   if (err != DB_SUCCESS) {
     return innodb_init_abort();

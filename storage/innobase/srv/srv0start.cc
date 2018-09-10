@@ -1580,7 +1580,7 @@ static dberr_t recreate_redo_files(lsn_t &flushed_lsn) {
   return DB_SUCCESS;
 }
 
-dberr_t srv_start(bool create_new_db) {
+dberr_t srv_start(bool create_new_db IF_XB(, lsn_t to_lsn)) {
   page_no_t sum_of_data_file_sizes;
   page_no_t tablespace_size_in_header;
   dberr_t err;
@@ -2027,7 +2027,8 @@ dberr_t srv_start(bool create_new_db) {
       }
     }
 
-    err = recv_recovery_from_checkpoint_start(*log_sys, flushed_lsn);
+    err = recv_recovery_from_checkpoint_start(*log_sys,
+                                              flushed_lsn IF_XB(, to_lsn));
     if (err != DB_SUCCESS) {
       return srv_init_abort(err);
     }

@@ -3315,14 +3315,16 @@ automatically when the hash table becomes full.
 @param[in]      len             buffer length
 @param[in]      start_lsn       buffer start lsn
 @param[out]  read_upto_lsn  scanning succeeded up to this lsn
+@param[in]      to_lsn          LSN to stop scanning at
 @return true if not able to scan any more in this log */
 #ifndef UNIV_HOTBACKUP
 static bool recv_scan_log_recs(log_t &log,
 #else  /* !UNIV_HOTBACKUP */
 bool meb_scan_log_recs(
 #endif /* !UNIV_HOTBACKUP */
-                               size_t max_memory, const byte *buf, size_t len,
-                               lsn_t start_lsn, lsn_t *read_upto_lsn) {
+                               size_t *max_memory, const byte *buf, size_t len,
+                               lsn_t start_lsn, lsn_t *read_upto_lsn,
+                               lsn_t to_lsn) {
   const byte *log_block = buf;
   lsn_t scanned_lsn = start_lsn;
   bool finished = false;
@@ -3440,6 +3442,11 @@ bool meb_scan_log_recs(
 
     scanned_lsn += data_len;
 
+    /* clip redo log at the specified LSN */
+    if (scanned_lsn > to_lsn) {
+      scanned_lsn = to_lsn;
+    }
+
     if (scanned_lsn > recv_sys->scanned_lsn) {
 #ifndef UNIV_HOTBACKUP
       if (!recv_needed_recovery && scanned_lsn > recv_sys->checkpoint_lsn) {
@@ -3495,7 +3502,7 @@ bool meb_scan_log_recs(
       recv_sys->scanned_epoch_no = block_header.m_epoch_no;
     }
 
-    if (data_len < OS_FILE_LOG_BLOCK_SIZE) {
+    if (data_len < OS_FILE_LOG_BLOCK_SIZE || scanned_lsn >= to_lsn) {
       /* Log data for this group ends here */
       finished = true;
 
@@ -3524,7 +3531,7 @@ bool meb_scan_log_recs(
     recv_parse_log_recs();
 
 #ifndef UNIV_HOTBACKUP
-    if (recv_heap_used() > max_memory) {
+    if (recv_heap_used() > *max_memory) {
       recv_apply_hashed_log_recs(log, false);
     }
 #endif /* !UNIV_HOTBACKUP */
@@ -3623,8 +3630,10 @@ Parses and hashes the log records if new data found.
                                         an mtr which we can ignore, as it is
                                         already applied to tablespace files)
                                         until which all redo log has been
-                                        scanned */
-static void recv_recovery_begin(log_t &log, const lsn_t checkpoint_lsn) {
+                                        scanned
+@param[in,out]  to_lsn                  LSN to stop recovery at */
+static void recv_recovery_begin(log_t &log, const lsn_t checkpoint_lsn,
+                                   lsn_t to_lsn) {
   mutex_enter(&recv_sys->mutex);
 
   recv_sys->len = 0;
@@ -3677,8 +3686,8 @@ static void recv_recovery_begin(log_t &log, const lsn_t checkpoint_lsn) {
       break;
     }
 
-    finished = recv_scan_log_recs(log, max_mem, log.buf, end_lsn - start_lsn,
-                                  start_lsn, &log.m_scanned_lsn);
+    finished = recv_scan_log_recs(log, &max_mem, log.buf, end_lsn - start_lsn,
+                                  start_lsn, &log.m_scanned_lsn, to_lsn);
 
     start_lsn = end_lsn;
   }
@@ -3713,7 +3722,8 @@ static void recv_init_crash_recovery() {
 
 #ifndef UNIV_HOTBACKUP
 
-dberr_t recv_recovery_from_checkpoint_start(log_t &log, lsn_t flush_lsn) {
+dberr_t recv_recovery_from_checkpoint_start(log_t &log, lsn_t flush_lsn,
+                                            lsn_t to_lsn) {
   /* Initialize red-black tree for fast insertions into the
   flush_list during recovery process. */
   buf_flush_init_flush_rbt();
@@ -3780,6 +3790,8 @@ dberr_t recv_recovery_from_checkpoint_start(log_t &log, lsn_t flush_lsn) {
 
   ut_a(checkpoint_lsn == checkpoint_header.m_checkpoint_lsn);
 
+  ut_ad(to_lsn >= checkpoint_lsn);
+
   /* Read the encryption header to get the encryption information. */
   err = log_encryption_read(log);
   if (err != DB_SUCCESS) {
@@ -3816,7 +3828,7 @@ dberr_t recv_recovery_from_checkpoint_start(log_t &log, lsn_t flush_lsn) {
     }
   }
 
-  recv_recovery_begin(log, checkpoint_lsn);
+  recv_recovery_begin(log, checkpoint_lsn, to_lsn);
 
   if (srv_read_only_mode && log.m_scanned_lsn > checkpoint_lsn) {
     ib::error(ER_IB_MSG_RECOVERY_IN_READ_ONLY);

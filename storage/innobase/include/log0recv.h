@@ -198,9 +198,11 @@ bool recv_page_is_brand_new(buf_block_t *block);
 @param[in,out]  log        redo log
 @param[in]      flush_lsn  lsn stored at offset FIL_PAGE_FILE_FLUSH_LSN
                            in the system tablespace header
+@param[in]      to_lsn          LSN to store recovery at
 @return error code or DB_SUCCESS */
 [[nodiscard]] dberr_t recv_recovery_from_checkpoint_start(log_t &log,
-                                                          lsn_t flush_lsn);
+                                                          lsn_t flush_lsn,
+                                                          lsn_t to_lsn);
 
 /** Determine if a redo log from a version before MySQL 8.0.30 is clean.
 @param[in,out]  log             redo log
