@@ -4946,7 +4946,7 @@ static int innobase_init_files(dict_init_mode_t dict_init_mode,
     directories.append(srv_undo_dir);
   }
 
-  err = srv_start(create, directories);
+  err = srv_start(create, directories, ULLONG_MAX);
 
   if (err != DB_SUCCESS) {
     return innodb_init_abort();
