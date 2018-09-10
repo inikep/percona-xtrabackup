@@ -39,7 +39,6 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 *******************************************************/
 
-#include "backup_copy.h"
 #include <fil0fil.h>
 #include <fsp0sysspace.h>
 #include <my_default.h>
@@ -62,7 +61,6 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include <string>
 #include "common.h"
 #include "fil_cur.h"
-#include "keyring_plugins.h"
 #include "os0event.h"
 #include "space_map.h"
 #include "xb0xb.h"
@@ -470,7 +468,7 @@ static bool datafile_rsync_backup(const char *filepath, bool save_to_list,
                                   FILE *f) {
   const char *ext_list[] = {"frm", "isl", "MYD", "MYI", "MAD", "MAI",
                             "MRG", "TRG", "TRN", "ARM", "ARZ", "CSM",
-                            "CSV", "opt", "par", NULL};
+                            "CSV", "opt", "par", "sdi", NULL};
 
   /* Get the name and the path for the tablespace. node->name always
   contains the path (which may be absolute for remote tablespaces in
@@ -587,7 +585,7 @@ static bool run_data_threads(const char *dir, data_thread_func_t func, uint n,
     data_threads[i].count = &count;
     data_threads[i].count_mutex = &count_mutex;
     data_threads[i].queue = &queue;
-    os_thread_create(PFS_NOT_INSTRUMENTED, func, &data_threads[i]);
+    os_thread_create(PFS_NOT_INSTRUMENTED, func, &data_threads[i]).start();
   }
 
   xb_process_datadir(
@@ -815,8 +813,9 @@ static bool reencrypt_datafile_header(const char *dir, const char *filepath,
 
   const page_size_t page_size(fsp_header_get_page_size(page));
 
-  if (!Encryption::fill_encryption_info(
-          space.encryption_key, space.encryption_iv, encrypt_info, false)) {
+  if (!Encryption::fill_encryption_info(space.encryption_key,
+                                        space.encryption_iv, encrypt_info,
+                                        false, true)) {
     my_close(fd, MYF(MY_FAE));
     return (false);
   }
@@ -1026,7 +1025,10 @@ out:
   return (ret);
 }
 
-bool backup_start() {
+/* Backup non-InnoDB data.
+@param  backup_lsn   backup LSN
+@return true if success. */
+bool backup_start(lsn_t &backup_lsn) {
   if (!opt_no_lock) {
     if (opt_safe_slave_backup) {
       if (!wait_for_safe_slave(mysql_connection)) {
@@ -1049,20 +1051,21 @@ bool backup_start() {
     return (false);
   }
 
-  // There is no need to stop slave thread before coping non-Innodb data when
+  // There is no need to stop slave thread before copying non-Innodb data when
   // --no-lock option is used because --no-lock option requires that no DDL or
   // DML to non-transaction tables can occur.
-  if (opt_no_lock) {
-    if (opt_safe_slave_backup) {
-      if (!wait_for_safe_slave(mysql_connection)) {
-        return (false);
-      }
+  if (opt_no_lock && opt_safe_slave_backup) {
+    if (!wait_for_safe_slave(mysql_connection)) {
+      return (false);
     }
   }
 
+  log_status_get(mysql_connection);
   if (opt_slave_info) {
     lock_binlog_maybe(mysql_connection);
+  }
 
+  if (opt_slave_info) {
     if (!write_slave_info(mysql_connection)) {
       return (false);
     }
@@ -1081,10 +1084,7 @@ bool backup_start() {
     write_current_binlog_file(mysql_connection);
   }
 
-  if (opt_binlog_info == BINLOG_INFO_ON) {
-    lock_binlog_maybe(mysql_connection);
-    write_binlog_info(mysql_connection);
-  }
+  write_binlog_info(mysql_connection, backup_lsn);
 
   if (have_flush_engine_logs) {
     msg_ts("Executing FLUSH NO_WRITE_TO_BINLOG ENGINE LOGS...\n");
@@ -1095,6 +1095,8 @@ bool backup_start() {
   return (true);
 }
 
+/* Finsh the backup. Release all locks. Write down backup metadata.
+@return true if success. */
 bool backup_finish() {
   /* release all locks */
   if (!opt_no_lock) {
@@ -1123,8 +1125,8 @@ bool backup_finish() {
   }
 
   msg_ts("Backup created in directory '%s'\n", xtrabackup_target_dir);
-  if (mysql_binlog_position != NULL) {
-    msg("MySQL binlog position: %s\n", mysql_binlog_position);
+  if (!mysql_binlog_position.empty()) {
+    msg("MySQL binlog position: %s\n", mysql_binlog_position.c_str());
   }
   if (!mysql_slave_position.empty() && opt_slave_info) {
     msg("MySQL slave binlog position: %s\n", mysql_slave_position.c_str());
@@ -1171,7 +1173,7 @@ bool copy_if_ext_matches(const char **ext_list, const datadir_entry_t &entry,
 bool copy_incremental_over_full() {
   const char *ext_list[] = {"frm", "isl", "MYD", "MYI", "MAD", "MAI",
                             "MRG", "TRG", "TRN", "ARM", "ARZ", "CSM",
-                            "CSV", "opt", "par", NULL};
+                            "CSV", "opt", "par", "sdi", NULL};
   const char *sup_files[] = {"xtrabackup_binlog_info",
                              "xtrabackup_galera_info",
                              "xtrabackup_slave_info",
@@ -1342,10 +1344,11 @@ bool should_skip_file_on_copy_back(const char *filepath) {
 }
 
 void copy_back_thread_func(datadir_thread_ctxt_t *ctx) {
-  bool ret = false;
+  bool ret = true;
   datadir_entry_t entry;
 
   if (my_thread_init()) {
+    ret = false;
     goto cleanup;
   }
 
