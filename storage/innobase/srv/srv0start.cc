@@ -1546,7 +1546,7 @@ static dberr_t srv_sys_enable_encryption() {
 }
 
 #endif  // XTRABACKUP
-dberr_t srv_start(bool create_new_db) {
+dberr_t srv_start(bool create_new_db IF_XB(, lsn_t to_lsn)) {
   lsn_t flushed_lsn;
 
   page_no_t sum_of_data_file_sizes;
@@ -2024,7 +2024,7 @@ dberr_t srv_start(bool create_new_db) {
       flushed_lsn = new_files_lsn;
     }
 
-    err = recv_recovery_from_checkpoint_start(*log_sys, flushed_lsn);
+    err = recv_recovery_from_checkpoint_start(*log_sys, flushed_lsn, to_lsn);
 
     if (err == DB_SUCCESS) {
       arch_page_sys->post_recovery_init();
