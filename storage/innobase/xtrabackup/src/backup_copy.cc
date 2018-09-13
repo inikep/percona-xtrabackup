@@ -490,22 +490,22 @@ static
 bool
 datafile_copy_backup(const char *filepath, uint thread_n)
 {
-	const char *ext_list[] = {"frm", "isl", "MYD", "MYI", "MAD", "MAI",
-		"MRG", "TRG", "TRN", "ARM", "ARZ", "CSM", "CSV", "opt", "par",
-		NULL};
+  const char *ext_list[] = {"frm", "isl", "MYD", "MYI", "MAD", "MAI",
+                            "MRG", "TRG", "TRN", "ARM", "ARZ", "CSM",
+                            "CSV", "opt", "par", "sdi", NULL};
 
-	/* Get the name and the path for the tablespace. node->name always
-	contains the path (which may be absolute for remote tablespaces in
-	5.6+). space->name contains the tablespace name in the form
-	"./database/table.ibd" (in 5.5-) or "database/table" (in 5.6+). For a
-	multi-node shared tablespace, space->name contains the name of the first
-	node, but that's irrelevant, since we only need node_name to match them
-	against filters, and the shared tablespace is always copied regardless
-	of the filters value. */
+  /* Get the name and the path for the tablespace. node->name always
+  contains the path (which may be absolute for remote tablespaces in
+  5.6+). space->name contains the tablespace name in the form
+  "./database/table.ibd" (in 5.5-) or "database/table" (in 5.6+). For a
+  multi-node shared tablespace, space->name contains the name of the first
+  node, but that's irrelevant, since we only need node_name to match them
+  against filters, and the shared tablespace is always copied regardless
+  of the filters value. */
 
-	if (check_if_skip_table(filepath)) {
-		msg_ts("[%02u] Skipping %s.\n", thread_n, filepath);
-		return(true);
+  if (check_if_skip_table(filepath)) {
+    msg_ts("[%02u] Skipping %s.\n", thread_n, filepath);
+    return (true);
 	}
 
 	if (filename_matches(filepath, ext_list)) {

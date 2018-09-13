@@ -2988,11 +2988,13 @@ void srv_start_threads(bool bootstrap) {
     ibuf_update_max_tablespace_id();
   }
 
+#ifndef XTRABACKUP
   /* Create the buffer pool dump/load thread */
   srv_threads.m_buf_dump =
       os_thread_create(buf_dump_thread_key, buf_dump_thread);
 
   srv_threads.m_buf_dump.start();
+#endif
 
   /* Create the dict stats gathering thread */
   srv_threads.m_dict_stats =
