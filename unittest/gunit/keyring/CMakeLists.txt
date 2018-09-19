@@ -22,7 +22,6 @@
 
 SET(TESTS
   keyring-api
-  keys_container
   buffered_file_io
   converter
   file_io
@@ -41,6 +40,7 @@ LIST(APPEND SRC_FILES
   ${CMAKE_SOURCE_DIR}/plugin/keyring/common/keyring_key.cc
   ${CMAKE_SOURCE_DIR}/plugin/keyring/common/keys_container.cc
   ${CMAKE_SOURCE_DIR}/plugin/keyring/common/keys_iterator.cc
+  ${CMAKE_SOURCE_DIR}/plugin/keyring/common/keyring_impl.cc
   ${CMAKE_SOURCE_DIR}/plugin/keyring/buffered_file_io.cc
   ${CMAKE_SOURCE_DIR}/plugin/keyring/converter.cc
   ${CMAKE_SOURCE_DIR}/plugin/keyring/buffer.cc

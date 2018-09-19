@@ -35,6 +35,7 @@ MYSQL_ADD_PLUGIN(keyring_file
   common/keyring_key.cc
   common/keys_container.cc
   common/keys_iterator.cc
+  common/keyring_impl.cc
   converter.cc
   digest.cc
   file_io.cc
