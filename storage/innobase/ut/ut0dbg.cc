@@ -47,7 +47,8 @@ this program; if not, write to the Free Software Foundation, Inc.,
     const char *file, /*!< in: source file containing the assertion */
     ulint line)       /*!< in: line number of the assertion */
 {
-#if !defined(UNIV_HOTBACKUP) && !defined(UNIV_NO_ERR_MSGS)
+#if !defined(UNIV_HOTBACKUP) && !defined(UNIV_NO_ERR_MSGS) && \
+    !defined(XTRABACKUP)
   ib::error(ER_IB_MSG_1273)
       << "Assertion failure: " << innobase_basename(file) << ":" << line
       << ((expr != nullptr) ? ":" : "") << ((expr != nullptr) ? expr : "")
