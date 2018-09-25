@@ -2340,7 +2340,8 @@ dberr_t srv_start(bool create_new_db IF_XB(, lsn_t to_lsn)) {
   didn't complete key rotation. Here, we will resume the
   rotation. */
   if (!srv_read_only_mode && !create_new_db &&
-      srv_force_recovery < SRV_FORCE_NO_LOG_REDO) {
+      srv_force_recovery < SRV_FORCE_NO_LOG_REDO &&
+      !use_dumped_tablespace_keys) {
     size_t fail_count = fil_encryption_rotate();
     if (fail_count > 0) {
       ib::info(ER_IB_MSG_1146)
