@@ -53,7 +53,8 @@ void ut_set_assert_callback(std::function<void()> &callback) {
 @param[in] line Line number of the assertion */
 [[noreturn]] void ut_dbg_assertion_failed(const char *expr, const char *file,
                                           ulint line) {
-#if !defined(UNIV_HOTBACKUP) && !defined(UNIV_NO_ERR_MSGS)
+#if !defined(UNIV_HOTBACKUP) && !defined(UNIV_NO_ERR_MSGS) && \
+    !defined(XTRABACKUP)
   ib::error(ER_IB_MSG_1273)
       << "Assertion failure: " << innobase_basename(file) << ":" << line
       << ((expr != nullptr) ? ":" : "") << ((expr != nullptr) ? expr : "")
