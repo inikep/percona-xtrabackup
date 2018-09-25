@@ -6153,7 +6153,7 @@ bool xb_process_datadir(const char *path,   /*!<in: datadir path */
 /************************************************************************
 Applies all .delta files from incremental_dir to the full backup.
 @return true on success. */
-static ibool xtrabackup_apply_deltas() {
+static bool xtrabackup_apply_deltas() {
   return xb_process_datadir(xtrabackup_incremental_dir, ".delta",
                             xtrabackup_apply_delta, NULL);
 }
