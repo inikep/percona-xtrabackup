@@ -96,13 +96,25 @@ void xb_fetch_tablespace_key(ulint space_id, byte *key, byte *iv) {
   memcpy(iv, it->second.iv, Encryption::KEY_LEN);
 }
 
+/** Save tablespace key for later use.
+@param[in]	space_id	tablespace id
+@param[in]	key		tablespace key
+@param[in]	key		tablespace iv */
+void xb_insert_tablespace_key(ulint space_id, byte *key, byte *iv) {
+  tablespace_encryption_info info;
+
+  memcpy(info.key, key, Encryption::KEY_LEN);
+  memcpy(info.iv, iv, Encryption::KEY_LEN);
+  encryption_info[space_id] = info;
+}
+
 /** Fetch tablespace key from "xtrabackup_keys" and set the encryption
 type for the tablespace.
 @param[in]	space		tablespace
 @return DB_SUCCESS or error code */
 dberr_t xb_set_encryption(fil_space_t *space) {
-  byte key[ENCRYPTION_KEY_LEN];
-  byte iv[ENCRYPTION_KEY_LEN];
+  byte key[Encryption::KEY_LEN];
+  byte iv[Encryption::KEY_LEN];
 
   xb_fetch_tablespace_key(space->id, key, iv);
 
@@ -322,7 +334,7 @@ bool xb_keyring_init_for_prepare(int argc, char **argv) {
         my_strdup(PSI_NOT_INSTRUMENTED, plugin_load, MYF(MY_FAE))));
   }
 
-  memset(server_uuid, 0, ENCRYPTION_SERVER_UUID_LEN + 1);
+  memset(server_uuid, 0, Encryption::SERVER_UUID_LEN + 1);
   if (uuid != NULL) {
     strncpy(server_uuid, uuid, Encryption::SERVER_UUID_LEN);
   }
@@ -390,9 +402,9 @@ bool xb_keyring_init_for_copy_back(int argc, char **argv) {
     return (false);
   }
 
-  memset(server_uuid, 0, ENCRYPTION_SERVER_UUID_LEN + 1);
+  memset(server_uuid, 0, Encryption::SERVER_UUID_LEN + 1);
   if (uuid != NULL) {
-    strncpy(server_uuid, uuid, ENCRYPTION_SERVER_UUID_LEN);
+    strncpy(server_uuid, uuid, Encryption::SERVER_UUID_LEN);
   }
 
   /* copy argc, argv because handle_options will destroy them */
