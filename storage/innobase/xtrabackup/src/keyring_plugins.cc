@@ -101,6 +101,18 @@ bool xb_fetch_tablespace_key(ulint space_id, byte *key, byte *iv) {
   return (true);
 }
 
+/** Save tablespace key for later use.
+@param[in]	space_id	tablespace id
+@param[in]	key		tablespace key
+@param[in]	key		tablespace iv */
+void xb_insert_tablespace_key(ulint space_id, byte *key, byte *iv) {
+  tablespace_encryption_info info;
+
+  memcpy(info.key, key, Encryption::KEY_LEN);
+  memcpy(info.iv, iv, Encryption::KEY_LEN);
+  encryption_info[space_id] = info;
+}
+
 /** Fetch tablespace key from "xtrabackup_keys" and set the encryption
 type for the tablespace.
 @param[in]	space		tablespace
