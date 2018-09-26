@@ -1468,7 +1468,7 @@ static void usage(void) {
   puts(
       "Open source backup tool for InnoDB and XtraDB\n\
 \n\
-Copyright (C) 2009-2017 Percona LLC and/or its affiliates.\n\
+Copyright (C) 2009-2018 Percona LLC and/or its affiliates.\n\
 Portions Copyright (C) 2000, 2011, MySQL AB & Innobase Oy. All Rights Reserved.\n\
 \n\
 This program is free software; you can redistribute it and/or\n\
@@ -2812,8 +2812,7 @@ error:
     write_filter->deinit(&write_filt_ctxt);
     ;
   }
-  msg("[%02u] xtrabackup: Error: "
-      "xtrabackup_copy_datafile() failed.\n",
+  msg("[%02u] xtrabackup: Error: xtrabackup_copy_datafile() failed.\n",
       thread_n);
   return (true); /*ERROR*/
 
@@ -3049,8 +3048,7 @@ static dberr_t xb_load_tablespaces(void)
   err = srv_sys_space.check_file_spec(false, 0);
 
   if (err != DB_SUCCESS) {
-    msg("xtrabackup: could not find data files at the "
-        "specified datadir\n");
+    msg("xtrabackup: could not find data files at the specified datadir\n");
     return (DB_ERROR);
   }
 
@@ -3139,8 +3137,7 @@ void xb_data_files_close(void)
 
   if (i == 1000) {
     ib::warn() << os_thread_count
-               << " threads created by InnoDB"
-                  " had not exited at shutdown!";
+               << " threads created by InnoDB had not exited at shutdown!";
   }
 
   undo_spaces_deinit();
@@ -4175,9 +4172,7 @@ static void xtrabackup_stats_func(int argc, char **argv) {
 
     if (!os_file_status(logname, &exists, &type) || !exists ||
         type != OS_FILE_TYPE_FILE) {
-      msg("xtrabackup: Error: "
-          "Cannot find log file %s.\n",
-          logname);
+      msg("xtrabackup: Error: Cannot find log file %s.\n", logname);
       msg("xtrabackup: Error: "
           "to use the statistics feature, you need a "
           "clean copy of the database including "
@@ -4362,8 +4357,8 @@ retry:
 
     if (ut_memcmp(log_buf + LOG_HEADER_CREATOR, (byte *)"xtrabkup",
                   (sizeof "xtrabkup") - 1) == 0) {
-      msg("  xtrabackup: 'ib_logfile0' seems to be "
-          "'xtrabackup_logfile'. will retry.\n");
+      msg("  xtrabackup: 'ib_logfile0' seems to be 'xtrabackup_logfile'. will "
+          "retry.\n");
 
       os_file_close(src_file);
       src_file = XB_FILE_UNDEFINED;
@@ -4405,6 +4400,16 @@ retry:
     msg("xtrabackup: notice: xtrabackup_logfile was already used "
         "to '--prepare'.\n");
     goto skip_modify;
+  }
+
+  if (log_format < Log_format::VERSION_8_0_1) {
+    msg("xtrabackup: error: Unsupported redo log format " UINT32PF
+        "\n"
+        "This version of Percona XtraBackup can only perform backups and "
+        "restores against MySQL 8.0, please use Percona Xtrabackup 2.4 for "
+        "this database.\n",
+        log_format);
+    goto error;
   }
 
   checkpoint_found = false;
@@ -4500,8 +4505,7 @@ retry:
   }
 
   msg("xtrabackup: xtrabackup_logfile detected: size=" UINT64PF
-      ", "
-      "start_lsn=(" LSN_PF ")\n",
+      ", start_lsn=(" LSN_PF ")\n",
       file_size, max_lsn);
 
   os_file_close(src_file);
@@ -6692,6 +6696,7 @@ void handle_options(int argc, char **argv, int *argc_client,
     exit(ho_error);
 
   msg("xtrabackup: recognized server arguments: %s\n", param_str.str().c_str());
+  param_str.str("");
   param_str.clear();
 
   if (load_defaults(conf_file, xb_client_default_groups, argc_client,
@@ -6724,9 +6729,7 @@ void handle_options(int argc, char **argv, int *argc_client,
       }
 
       if (!server_option) {
-        msg("xtrabackup: Error:"
-            " unknown argument: '%s'\n",
-            opt);
+        msg("xtrabackup: Error: unknown argument: '%s'\n", opt);
         exit(EXIT_FAILURE);
       }
     }

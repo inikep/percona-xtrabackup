@@ -246,7 +246,6 @@ static constexpr const char *auto_event_names[] = {
     /* Keep this list alphabetically sorted. */
     "api0api",
     "api0misc",
-    "backup_copy",
     "btr0btr",
     "btr0cur",
     "btr0load",
