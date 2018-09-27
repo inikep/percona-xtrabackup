@@ -51,7 +51,6 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include <srv0start.h>
 #include <ut0mem.h>
 #include <ut0new.h>
-#include <version_check_pl.h>
 #include <algorithm>
 #include <functional>
 #include <queue>
@@ -67,6 +66,11 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "backup_mysql.h"
 #include "keyring_plugins.h"
 #include "xtrabackup.h"
+#include "xtrabackup_version.h"
+#include "xtrabackup_config.h"
+#ifdef HAVE_VERSION_CHECK
+#include <version_check_pl.h>
+#endif
 
 using std::min;
 
@@ -1786,6 +1790,7 @@ bool decrypt_decompress() {
   return (ret);
 }
 
+#ifdef HAVE_VERSION_CHECK
 void version_check() {
   if (opt_password != NULL) {
     setenv("option_mysql_password", opt_password, 1);
@@ -1804,6 +1809,7 @@ void version_check() {
     snprintf(port, sizeof(port), "%u", opt_port);
     setenv("option_mysql_port", port, 1);
   }
+  setenv("XTRABACKUP_VERSION", XTRABACKUP_VERSION, 1);
 
   FILE *pipe = popen("perl", "w");
   if (pipe == NULL) {
@@ -1814,3 +1820,4 @@ void version_check() {
 
   pclose(pipe);
 }
+#endif
