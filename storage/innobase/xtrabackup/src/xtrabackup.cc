@@ -113,6 +113,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "xbcrypt_common.h"
 #include "xbstream.h"
 #include "xtrabackup.h"
+#include "xtrabackup_config.h"
 
 /* TODO: replace with appropriate macros used in InnoDB 5.6 */
 #define PAGE_ZIP_MIN_SIZE_SHIFT 10
@@ -245,8 +246,14 @@ char *log_ignored_opt = NULL;
 
 /* === metadata of backup === */
 #define XTRABACKUP_METADATA_FILENAME "xtrabackup_checkpoints"
-char metadata_type[30] = ""; /*[full-backuped|log-applied|
-                             full-prepared|incremental]*/
+static char metadata_type_str[30] = ""; /*[full-backuped|log-applied|
+                                        full-prepared|incremental]*/
+static enum {
+  METADATA_FULL_BACKUP,
+  METADATA_INCREMENTAL_BACKUP,
+  METADATA_LOG_APPLIED,
+  METADATA_FULL_PREPARED
+} metadata_type;
 lsn_t metadata_from_lsn = 0;
 lsn_t metadata_to_lsn = 0;
 lsn_t metadata_last_lsn = 0;
@@ -381,7 +388,9 @@ bool opt_no_lock = FALSE;
 bool opt_safe_slave_backup = FALSE;
 bool opt_rsync = FALSE;
 bool opt_force_non_empty_dirs = FALSE;
+#ifdef HAVE_VERSION_CHECK
 bool opt_noversioncheck = FALSE;
+#endif
 bool opt_no_backup_locks = FALSE;
 bool opt_decompress = FALSE;
 bool opt_remove_original = FALSE;
@@ -630,7 +639,9 @@ enum options_xtrabackup {
   OPT_SAFE_SLAVE_BACKUP,
   OPT_RSYNC,
   OPT_FORCE_NON_EMPTY_DIRS,
+#ifdef HAVE_VERSION_CHECK
   OPT_NO_VERSION_CHECK,
+#endif
   OPT_NO_BACKUP_LOCKS,
   OPT_DECOMPRESS,
   OPT_INCREMENTAL_HISTORY_NAME,
@@ -967,11 +978,13 @@ struct my_option xb_client_options[] = {
      (uchar *)&opt_force_non_empty_dirs, (uchar *)&opt_force_non_empty_dirs, 0,
      GET_BOOL, NO_ARG, 0, 0, 0, 0, 0, 0},
 
+#ifdef HAVE_VERSION_CHECK
     {"no-version-check", OPT_NO_VERSION_CHECK,
      "This option disables the "
      "version check which is enabled by the --version-check option.",
      (uchar *)&opt_noversioncheck, (uchar *)&opt_noversioncheck, 0, GET_BOOL,
      NO_ARG, 0, 0, 0, 0, 0, 0},
+#endif
 
     {"tables-compatibility-check", OPT_XTRA_TABLES_COMPATIBILITY_CHECK,
      "This option enables engine compatibility warning.",
@@ -2154,7 +2167,7 @@ static void dict_load_from_spaces_sdi() {
   my_thread_end();
 }
 
-static bool innodb_init(bool init_dd) {
+static bool innodb_init(bool init_dd, bool for_apply_log) {
   os_event_global_init();
 
   /* Check if the data files exist or not. */
@@ -2179,7 +2192,7 @@ static bool innodb_init(bool init_dd) {
   directories.append(MySQL_datadir_path.path());
 
   lsn_t to_lsn = ULLONG_MAX;
-  if (!init_dd && xtrabackup_prepare) {
+  if (for_apply_log && metadata_type == METADATA_FULL_BACKUP) {
     to_lsn = (xtrabackup_incremental_dir == nullptr) ? metadata_last_lsn
                                                      : incremental_last_lsn;
   }
@@ -2250,7 +2263,7 @@ static bool xtrabackup_read_metadata(char *filename) {
     return (FALSE);
   }
 
-  if (fscanf(fp, "backup_type = %29s\n", metadata_type) != 1) {
+  if (fscanf(fp, "backup_type = %29s\n", metadata_type_str) != 1) {
     r = FALSE;
     goto end;
   }
@@ -2286,7 +2299,7 @@ static void xtrabackup_print_metadata(char *buf, size_t buf_len) {
            "to_lsn = " UINT64PF
            "\n"
            "last_lsn = " UINT64PF "\n",
-           metadata_type, metadata_from_lsn, metadata_to_lsn,
+           metadata_type_str, metadata_from_lsn, metadata_to_lsn,
            metadata_last_lsn);
 }
 
@@ -4643,10 +4656,10 @@ skip_last_cp:
   }
 
   if (!xtrabackup_incremental) {
-    strcpy(metadata_type, "full-backuped");
+    strcpy(metadata_type_str, "full-backuped");
     metadata_from_lsn = 0;
   } else {
-    strcpy(metadata_type, "incremental");
+    strcpy(metadata_type_str, "incremental");
     metadata_from_lsn = incremental_lsn;
   }
   metadata_to_lsn = latest_cp;
@@ -5069,7 +5082,7 @@ static void xtrabackup_stats_func(int argc, char **argv) {
       "--use-memory parameter)\n",
       xtrabackup_use_memory);
 
-  if (innodb_init(true)) exit(EXIT_FAILURE);
+  if (innodb_init(true, false)) exit(EXIT_FAILURE);
 
   xb_filters_init();
 
@@ -6858,33 +6871,33 @@ static void xtrabackup_prepare_func(int argc, char **argv) {
     exit(EXIT_FAILURE);
   }
 
-  if (!strcmp(metadata_type, "full-backuped")) {
-    msg("xtrabackup: This target seems to be not prepared "
-        "yet.\n");
-  } else if (!strcmp(metadata_type, "log-applied")) {
-    msg("xtrabackup: This target seems to be already "
-        "prepared with --apply-log-only.\n");
+  if (!strcmp(metadata_type_str, "full-backuped")) {
+    msg("xtrabackup: This target seems to be not prepared yet.\n");
+    metadata_type = METADATA_FULL_BACKUP;
+  } else if (!strcmp(metadata_type_str, "log-applied")) {
+    msg("xtrabackup: This target seems to be already prepared with "
+        "--apply-log-only.\n");
+    metadata_type = METADATA_LOG_APPLIED;
     goto skip_check;
-  } else if (!strcmp(metadata_type, "full-prepared")) {
-    msg("xtrabackup: This target seems to be already "
-        "prepared.\n");
+  } else if (!strcmp(metadata_type_str, "full-prepared")) {
+    msg("xtrabackup: This target seems to be already prepared.\n");
+    metadata_type = METADATA_FULL_PREPARED;
   } else {
-    msg("xtrabackup: This target seems not to have correct "
-        "metadata...\n");
+    msg("xtrabackup: This target seems not to have correct metadata...\n");
     exit(EXIT_FAILURE);
   }
 
   if (xtrabackup_incremental) {
-    msg("xtrabackup: error: applying incremental backup "
-        "needs target prepared with --apply-log-only.\n");
+    msg("xtrabackup: error: applying incremental backup needs target prepared "
+        "with --apply-log-only.\n");
     exit(EXIT_FAILURE);
   }
 skip_check:
   if (xtrabackup_incremental && metadata_to_lsn != incremental_lsn) {
-    msg("xtrabackup: error: This incremental backup seems "
-        "not to be proper for the target.\n"
-        "xtrabackup:  Check 'to_lsn' of the target and "
-        "'from_lsn' of the incremental.\n");
+    msg("xtrabackup: error: This incremental backup seems not to be proper for "
+        "the target.\n"
+        "xtrabackup:  Check 'to_lsn' of the target and 'from_lsn' of the "
+        "incremental.\n");
     exit(EXIT_FAILURE);
   }
 
@@ -7004,7 +7017,7 @@ skip_check:
       "(set by --use-memory parameter)\n",
       xtrabackup_use_memory);
 
-  if (innodb_init(true)) {
+  if (innodb_init(true, true)) {
     goto error_cleanup;
   }
 
@@ -7160,7 +7173,8 @@ skip_check:
   {
     char filename[FN_REFLEN];
 
-    strcpy(metadata_type, srv_apply_log_only ? "log-applied" : "full-prepared");
+    strcpy(metadata_type_str,
+           srv_apply_log_only ? "log-applied" : "full-prepared");
 
     if (xtrabackup_incremental && metadata_to_lsn < incremental_to_lsn) {
       metadata_to_lsn = incremental_to_lsn;
@@ -7170,9 +7184,7 @@ skip_check:
     sprintf(filename, "%s/%s", xtrabackup_target_dir,
             XTRABACKUP_METADATA_FILENAME);
     if (!xtrabackup_write_metadata(filename)) {
-      msg("xtrabackup: Error: failed to write metadata "
-          "to '%s'\n",
-          filename);
+      msg("xtrabackup: Error: failed to write metadata to '%s'\n", filename);
       exit(EXIT_FAILURE);
     }
 
@@ -7180,9 +7192,7 @@ skip_check:
       sprintf(filename, "%s/%s", xtrabackup_extra_lsndir,
               XTRABACKUP_METADATA_FILENAME);
       if (!xtrabackup_write_metadata(filename)) {
-        msg("xtrabackup: Error: failed to write "
-            "metadata to '%s'\n",
-            filename);
+        msg("xtrabackup: Error: failed to write metadata to '%s'\n", filename);
         exit(EXIT_FAILURE);
       }
     }
@@ -7224,7 +7234,7 @@ skip_check:
 
     srv_shutdown_state = SRV_SHUTDOWN_NONE;
 
-    if (innodb_init(false)) goto error;
+    if (innodb_init(false, false)) goto error;
 
     if (innodb_end()) goto error;
 
@@ -7364,9 +7374,11 @@ bool xb_init() {
   }
 
   if (xtrabackup_backup) {
+#ifdef HAVE_VERSION_CHECK
     if (!opt_noversioncheck) {
       version_check();
     }
+#endif
 
     if ((mysql_connection = xb_mysql_connect()) == NULL) {
       return (false);
