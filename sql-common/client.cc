@@ -123,21 +123,9 @@
 #include "../libmysql/init_commands_array.h"
 #include "../libmysql/mysql_trace.h" /* MYSQL_TRACE() instrumentation */
 #include "sql_common.h"
-#ifdef MYSQL_SERVER
+#if defined(MYSQL_SERVER) && !defined(XTRABACKUP)
 #include "mysql_com_server.h"
 #include "sql/client_settings.h"
-
-#ifdef XTRABACKUP
-MYSQL_FIELD *cli_list_fields(MYSQL *mysql);
-bool cli_read_prepare_result(MYSQL *mysql, MYSQL_STMT *stmt);
-MYSQL_DATA *cli_read_rows(MYSQL *mysql, MYSQL_FIELD *mysql_fields, uint fields);
-int cli_stmt_execute(MYSQL_STMT *stmt);
-int cli_read_binary_rows(MYSQL_STMT *stmt);
-int cli_unbuffered_fetch(MYSQL *mysql, char **row);
-const char *cli_read_statistics(MYSQL *mysql);
-int cli_read_change_user_result(MYSQL *mysql);
-#endif
-
 #else
 #include "libmysql/client_settings.h"
 #endif
@@ -1827,7 +1815,7 @@ void end_server(MYSQL *mysql) {
     vio_description(mysql->net.vio, desc);
     DBUG_PRINT("info", ("Net: %s", desc));
 #endif  // DBUG_OFF
-#ifdef MYSQL_SERVER
+#if defined(MYSQL_SERVER) && !defined(XTRABACKUP)
     slave_io_thread_detach_vio();
 #endif
     vio_delete(mysql->net.vio);
@@ -5368,12 +5356,14 @@ static mysql_state_machine_status authsm_handle_first_authenticate_user(
     mysql_async_auth *ctx) {
   DBUG_TRACE;
   MYSQL *mysql = ctx->mysql;
-  DBUG_PRINT("info", ("authenticate_user returned %s",
-                      ctx->res == CR_OK      ? "CR_OK"
-                      : ctx->res == CR_ERROR ? "CR_ERROR"
-                      : ctx->res == CR_OK_HANDSHAKE_COMPLETE
-                          ? "CR_OK_HANDSHAKE_COMPLETE"
-                          : "error"));
+  DBUG_PRINT("info",
+             ("authenticate_user returned %s",
+              ctx->res == CR_OK
+                  ? "CR_OK"
+                  : ctx->res == CR_ERROR ? "CR_ERROR"
+                                         : ctx->res == CR_OK_HANDSHAKE_COMPLETE
+                                               ? "CR_OK_HANDSHAKE_COMPLETE"
+                                               : "error"));
 
   static_assert(CR_OK == -1, "");
   static_assert(CR_ERROR == 0, "");
@@ -5501,12 +5491,14 @@ static mysql_state_machine_status authsm_handle_second_authenticate_user(
     mysql_async_auth *ctx) {
   DBUG_TRACE;
   MYSQL *mysql = ctx->mysql;
-  DBUG_PRINT("info", ("second authenticate_user returned %s",
-                      ctx->res == CR_OK      ? "CR_OK"
-                      : ctx->res == CR_ERROR ? "CR_ERROR"
-                      : ctx->res == CR_OK_HANDSHAKE_COMPLETE
-                          ? "CR_OK_HANDSHAKE_COMPLETE"
-                          : "error"));
+  DBUG_PRINT("info",
+             ("second authenticate_user returned %s",
+              ctx->res == CR_OK
+                  ? "CR_OK"
+                  : ctx->res == CR_ERROR ? "CR_ERROR"
+                                         : ctx->res == CR_OK_HANDSHAKE_COMPLETE
+                                               ? "CR_OK_HANDSHAKE_COMPLETE"
+                                               : "error"));
   if (ctx->res > CR_OK) {
     if (ctx->res > CR_ERROR)
       set_mysql_error(mysql, ctx->res, unknown_sqlstate);
