@@ -3311,11 +3311,6 @@ bool meb_scan_log_recs(
 
     scanned_lsn += data_len;
 
-    /* clip redo log at the specified LSN */
-    if (scanned_lsn > to_lsn) {
-      scanned_lsn = to_lsn;
-    }
-
     if (scanned_lsn > recv_sys->scanned_lsn) {
 #ifndef UNIV_HOTBACKUP
       if (srv_read_only_mode) {
@@ -3672,6 +3667,8 @@ dberr_t recv_recovery_from_checkpoint_start(log_t &log, lsn_t flush_lsn,
   checkpoint_lsn = mach_read_from_8(log.checkpoint_buf + LOG_CHECKPOINT_LSN);
 
   checkpoint_no = mach_read_from_8(log.checkpoint_buf + LOG_CHECKPOINT_NO);
+
+  ut_ad(to_lsn >= checkpoint_lsn);
 
   /* Read the first log file header to print a note if this is
   a recovery from a restored InnoDB Hot Backup */
