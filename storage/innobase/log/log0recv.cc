@@ -3508,11 +3508,6 @@ bool meb_scan_log_recs(
 
     scanned_lsn += data_len;
 
-    /* clip redo log at the specified LSN */
-    if (scanned_lsn > to_lsn) {
-      scanned_lsn = to_lsn;
-    }
-
     if (scanned_lsn > recv_sys->scanned_lsn) {
 #ifndef UNIV_HOTBACKUP
       if (!recv_needed_recovery && scanned_lsn > recv_sys->checkpoint_lsn) {
