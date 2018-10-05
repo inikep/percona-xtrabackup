@@ -130,7 +130,8 @@ MYSQL *mysql_connection;
 
 /* Whether LOCK TABLES FOR BACKUP / FLUSH TABLES WITH READ LOCK has been issued
 during backup */
-static bool tables_locked;
+static bool tables_locked = false;
+static bool instance_locked = false;
 
 MYSQL *xb_mysql_connect() {
   MYSQL *connection = mysql_init(NULL);
@@ -657,9 +658,10 @@ bool detect_mysql_capabilities_for_backup() {
     opt_galera_info = false;
   }
 
-  if (opt_slave_info && have_multi_threaded_slave && !have_gtid_slave) {
-    msg("The --slave-info option requires GTID enabled for a "
-        "multi-threaded slave.\n");
+  if (opt_slave_info && have_multi_threaded_slave && !have_gtid_slave &&
+      !opt_safe_slave_backup) {
+    msg("The --slave-info option requires GTID enabled or --safe-slave-backup "
+        "option used for a multi-threaded slave.\n");
     return (false);
   }
 
@@ -966,9 +968,11 @@ bool lock_tables_for_backup(MYSQL *connection, int timeout) {
     return (true);
   }
 
-  msg_ts("Error: LOCK TABLES FOR BACKUP is not supported.\n");
+  instance_locked = true;
+  msg_ts("Executing LOCK INSTANCE FOR BACKUP...\n");
+  xb_mysql_query(connection, "LOCK INSTANCE FOR BACKUP", true);
 
-  return (false);
+  return (true);
 }
 
 /*********************************************************************/ /**
@@ -1063,8 +1067,16 @@ void unlock_all(MYSQL *connection) {
     os_thread_sleep(opt_debug_sleep_before_unlock * 1000);
   }
 
-  msg_ts("Executing UNLOCK TABLES\n");
-  xb_mysql_query(connection, "UNLOCK TABLES", false);
+  if (instance_locked) {
+    msg_ts("Executing UNLOCK INSTANCE\n");
+    xb_mysql_query(connection, "UNLOCK INSTANCE", false);
+    instance_locked = false;
+  }
+
+  if (tables_locked) {
+    msg_ts("Executing UNLOCK TABLES\n");
+    xb_mysql_query(connection, "UNLOCK TABLES", false);
+  }
 
   msg_ts("All tables unlocked\n");
 }
@@ -1246,6 +1258,7 @@ bool write_slave_info(MYSQL *connection) {
   char *position = NULL;
   char *auto_position = NULL;
   char *channel_name = NULL;
+  char *slave_sql_running = NULL;
   bool result = true;
 
   typedef struct {
@@ -1257,10 +1270,13 @@ bool write_slave_info(MYSQL *connection) {
 
   std::map<std::string, channel_info_t> channels;
 
-  mysql_variable status[] = {
-      {"Master_Host", &master},           {"Relay_Master_Log_File", &filename},
-      {"Exec_Master_Log_Pos", &position}, {"Channel_Name", &channel_name},
-      {"Auto_Position", &auto_position},  {NULL, NULL}};
+  mysql_variable status[] = {{"Master_Host", &master},
+                             {"Relay_Master_Log_File", &filename},
+                             {"Exec_Master_Log_Pos", &position},
+                             {"Channel_Name", &channel_name},
+                             {"Slave_SQL_Running", &slave_sql_running},
+                             {"Auto_Position", &auto_position},
+                             {NULL, NULL}};
 
   MYSQL_RES *slave_status_res =
       xb_mysql_query(connection, "SHOW SLAVE STATUS", true, true);
@@ -1272,6 +1288,10 @@ bool write_slave_info(MYSQL *connection) {
     info.filename = filename;
     info.position = strtoull(position, NULL, 10);
     channels[channel_name ? channel_name : ""] = info;
+
+    ut_ad(!have_multi_threaded_slave || have_gtid_slave ||
+          strcasecmp(slave_sql_running, "No") == 0);
+
     free_mysql_variables(status);
   }
 
