@@ -1394,6 +1394,10 @@ Disable with --skip-innodb-doublewrite.",
 
 uint xb_server_options_count = array_elements(xb_server_options);
 
+/* Following definitions are to avoid linking with unused datasinks
+   and their link dependencies */
+datasink_t datasink_decompress;
+
 #ifndef __WIN__
 static int debug_sync_resumed;
 
@@ -2851,10 +2855,7 @@ void io_watching_thread() {
 
 /**************************************************************************
 Datafiles copying thread.*/
-static void data_copy_thread_func(
-    /*==================*/
-    data_thread_ctxt_t *ctxt) /* thread context */
-{
+static void data_copy_thread_func(data_thread_ctxt_t *ctxt) {
   uint num = ctxt->num;
   fil_node_t *node;
 
@@ -2866,13 +2867,13 @@ static void data_copy_thread_func(
 
   debug_sync_point("data_copy_thread_func");
 
-  while ((node = datafiles_iter_next(ctxt->it)) != NULL) {
+  while ((node = datafiles_iter_next(ctxt->it)) != NULL && !*(ctxt->error)) {
     /* copy the datafile */
     if (xtrabackup_copy_datafile(node, num)) {
       msg("[%02u] xtrabackup: Error: "
           "failed to copy datafile.\n",
           num);
-      exit(EXIT_FAILURE);
+      *(ctxt->error) = true;
     }
   }
 
