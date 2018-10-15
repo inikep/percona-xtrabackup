@@ -2998,8 +2998,8 @@ void srv_start_threads(bool bootstrap) {
     return;
   }
 
-  if (!bootstrap && srv_force_recovery < SRV_FORCE_NO_TRX_UNDO &&
-      trx_sys_need_rollback()) {
+  if (!srv_apply_log_only && !bootstrap &&
+      srv_force_recovery < SRV_FORCE_NO_TRX_UNDO && trx_sys_need_rollback()) {
     /* Rollback all recovered transactions that are
     not in committed nor in XA PREPARE state. */
     srv_threads.m_trx_recovery_rollback = os_thread_create(
