@@ -623,7 +623,7 @@ static void dict_stats_snapshot_free(
 static void dict_stats_update_transient_for_index(
     dict_index_t *index) /*!< in/out: index */
 {
-  if (srv_force_recovery >= SRV_FORCE_NO_TRX_UNDO &&
+  if (!srv_apply_log_only && srv_force_recovery >= SRV_FORCE_NO_TRX_UNDO &&
       (srv_force_recovery >= SRV_FORCE_NO_LOG_REDO || !index->is_clustered())) {
     /* If we have set a high innodb_force_recovery
     level, do not calculate statistics, as a badly
@@ -678,7 +678,8 @@ static void dict_stats_update_transient_for_index(
  are not saved on disk.
  This was the only way to calculate statistics before the
  Persistent Statistics feature was introduced. */
-void dict_stats_update_transient(dict_table_t *table) /*!< in/out: table */
+void dict_stats_update_transient(
+    dict_table_t *table) /*!< in/out: table */
 {
   dict_index_t *index;
   ulint sum_of_index_sizes = 0;
@@ -2697,7 +2698,8 @@ storage */
 
     dict_stats_empty_table(table);
     return (DB_TABLESPACE_DELETED);
-  } else if (srv_force_recovery >= SRV_FORCE_NO_IBUF_MERGE) {
+  } else if (!srv_apply_log_only &&
+             srv_force_recovery >= SRV_FORCE_NO_IBUF_MERGE) {
     /* If we have set a high innodb_force_recovery level, do
     not calculate statistics, as a badly corrupted index can
     cause a crash in it. */
