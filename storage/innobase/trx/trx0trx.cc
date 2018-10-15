@@ -1019,6 +1019,10 @@ static inline void trx_remove_from_rw_trx_list(trx_t *trx) {
 void trx_lists_init_at_db_start(void) {
   ut_a(srv_is_being_started);
 
+  if (srv_apply_log_only) {
+    return;
+  }
+
   /* Look through the rollback segments in the TRX_SYS for
   transaction undo logs. */
   for (auto rseg : trx_sys->rsegs) {
