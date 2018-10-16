@@ -42,6 +42,20 @@ static void common_init(
 }
 
 /****************************************************************/ /**
+ Update the filter with the actual batch size asfter it has
+ been read. */
+static void common_update(
+    /*========*/
+    xb_read_filt_ctxt_t *ctxt,  /*!<in/out: read filter context */
+    uint64_t len,               /*!in: length in bytes of the batch has
+                                   been read */
+    const xb_fil_cur_t *cursor) /*!<in: file cursor */
+{
+  ctxt->data_file_size = cursor->statinfo.st_size;
+  ctxt->offset += len;
+}
+
+/****************************************************************/ /**
  Initialize the pass-through read filter. */
 static void rf_pass_through_init(
     /*=================*/
@@ -67,13 +81,15 @@ static void rf_pass_through_get_next_batch(
                                    of pages */
 {
   *read_batch_start = ctxt->offset;
+  if (ctxt->offset >= ctxt->data_file_size) {
+    *read_batch_len = 0;
+    return;
+  }
   *read_batch_len = ctxt->data_file_size - ctxt->offset;
 
   if (*read_batch_len > ctxt->buffer_capacity) {
     *read_batch_len = ctxt->buffer_capacity;
   }
-
-  ctxt->offset += *read_batch_len;
 }
 
 /****************************************************************/ /**
@@ -87,4 +103,4 @@ static void rf_pass_through_deinit(
 /* The pass-through read filter */
 xb_read_filt_t rf_pass_through = {&rf_pass_through_init,
                                   &rf_pass_through_get_next_batch,
-                                  &rf_pass_through_deinit};
+                                  &rf_pass_through_deinit, &common_update};
