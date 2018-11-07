@@ -6691,16 +6691,14 @@ void handle_options(int argc, char **argv, int *argc_client,
 
     if (optend - argv[i] == 15 &&
         !strncmp(argv[i], "--defaults-file", optend - argv[i])) {
-      msg("xtrabackup: Error: --defaults-file "
-          "must be specified first on the command "
-          "line\n");
+      msg("xtrabackup: Error: --defaults-file must be specified first "
+          "on the command line\n");
       exit(EXIT_FAILURE);
     }
     if (optend - argv[i] == 21 &&
         !strncmp(argv[i], "--defaults-extra-file", optend - argv[i])) {
-      msg("xtrabackup: Error: --defaults-extra-file "
-          "must be specified first on the command "
-          "line\n");
+      msg("xtrabackup: Error: --defaults-extra-file must be specified first "
+          "on the command line\n");
       exit(EXIT_FAILURE);
     }
   }
@@ -6710,9 +6708,12 @@ void handle_options(int argc, char **argv, int *argc_client,
                                  xb_get_one_option)))
     exit(ho_error);
 
-  msg("xtrabackup: recognized server arguments: %s\n", param_str.str().c_str());
-  param_str.str("");
-  param_str.clear();
+  if (!param_str.str().empty()) {
+    msg("xtrabackup: recognized server arguments: %s\n",
+        param_str.str().c_str());
+    param_str.str("");
+    param_str.clear();
+  }
 
   if (load_defaults(conf_file, xb_client_default_groups, argc_client,
                     argv_client, &argv_alloc)) {
@@ -6724,8 +6725,11 @@ void handle_options(int argc, char **argv, int *argc_client,
                                  xb_get_one_option)))
     exit(ho_error);
 
-  msg("xtrabackup: recognized client arguments: %s\n", param_str.str().c_str());
-  param_str.clear();
+  if (!param_str.str().empty()) {
+    msg("xtrabackup: recognized client arguments: %s\n",
+        param_str.str().c_str());
+    param_str.clear();
+  }
 
   /* Reject command line arguments that don't look like options, i.e. are
   not of the form '-X' (single-character options) or '--option' (long
@@ -6791,7 +6795,10 @@ int main(int argc, char **argv) {
                  &server_defaults);
 
   print_version();
-  xb_libgcrypt_init();
+
+  if (xtrabackup_encrypt) {
+    xb_libgcrypt_init();
+  }
 
   if ((!xtrabackup_print_param) && (!xtrabackup_prepare) &&
       (strcmp(mysql_data_home, "./") == 0)) {
@@ -6871,9 +6878,7 @@ int main(int argc, char **argv) {
             XTRABACKUP_METADATA_FILENAME);
 
     if (!xtrabackup_read_metadata(filename)) {
-      msg("xtrabackup: error: failed to read metadata from "
-          "%s\n",
-          filename);
+      msg("xtrabackup: error: failed to read metadata from %s\n", filename);
       exit(EXIT_FAILURE);
     }
 
@@ -6886,9 +6891,7 @@ int main(int argc, char **argv) {
             XTRABACKUP_METADATA_FILENAME);
 
     if (!xtrabackup_read_metadata(filename)) {
-      msg("xtrabackup: error: failed to read metadata from "
-          "%s\n",
-          filename);
+      msg("xtrabackup: error: failed to read metadata from %s\n", filename);
       exit(EXIT_FAILURE);
     }
 
@@ -6928,8 +6931,7 @@ int main(int argc, char **argv) {
 
   if (xtrabackup_throttle && !xtrabackup_backup) {
     xtrabackup_throttle = 0;
-    msg("xtrabackup: warning: --throttle has effect "
-        "only with --backup\n");
+    msg("xtrabackup: warning: --throttle has effect only with --backup\n");
   }
 
   /* cannot execute both for now */
