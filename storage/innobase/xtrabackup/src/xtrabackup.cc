@@ -136,7 +136,6 @@ const char reserved_system_space_name[] = "innodb_system";
 /* This tablespace name is reserved by InnoDB for the predefined temporary
 tablespace. */
 const char reserved_temporary_space_name[] = "innodb_temporary";
-ulong opt_ssl_fips_mode = SSL_FIPS_MODE_OFF;
 
 /* === xtrabackup specific options === */
 char xtrabackup_real_target_dir[FN_REFLEN] = "./xtrabackup_backupfiles/";
@@ -452,21 +451,7 @@ extern const char *innodb_flush_method_names[];
 /** Enumeration of innodb_flush_method */
 extern TYPELIB innodb_flush_method_typelib;
 
-uint opt_ssl_mode;
-extern char *opt_ssl_ca;
-extern char *opt_ssl_capath;
-extern char *opt_ssl_cert;
-extern char *opt_ssl_cipher;
-extern char *opt_ssl_key;
-extern char *opt_ssl_crl;
-extern char *opt_ssl_crlpath;
-extern char *opt_tls_version;
-extern ulong opt_ssl_fips_mode;
-bool ssl_mode_set_explicitly;
-
-TYPELIB ssl_mode_typelib;
-TYPELIB ssl_fips_mode_typelib;
-
+#include "sslopt-vars.h"
 #include "caching_sha2_passwordopt-vars.h"
 
 extern struct rand_struct sql_rand;

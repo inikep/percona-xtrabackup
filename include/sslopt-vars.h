@@ -38,7 +38,7 @@
 #include "template_utils.h"
 #include "typelib.h"
 
-#ifdef MYSQL_SERVER
+#if defined(MYSQL_SERVER) && !defined(XTRABACKUP)
 #error This header is supposed to be used only in the client
 #endif
 
@@ -51,6 +51,7 @@ const char *ssl_fips_mode_names_lib[] = {"OFF", "ON", "STRICT", NullS};
 TYPELIB ssl_fips_mode_typelib = {array_elements(ssl_fips_mode_names_lib) - 1,
                                  "", ssl_fips_mode_names_lib, nullptr};
 
+#ifndef XTRABACKUP
 static uint opt_ssl_mode = SSL_MODE_PREFERRED;
 static char *opt_ssl_ca = nullptr;
 static char *opt_ssl_capath = nullptr;
@@ -67,6 +68,24 @@ static char *opt_ssl_session_data = nullptr;
 static bool opt_ssl_session_data_continue_on_failed_reuse = false;
 
 static inline int set_client_ssl_options(MYSQL *mysql) {
+#else
+uint opt_ssl_mode = SSL_MODE_PREFERRED;
+char *opt_ssl_ca = nullptr;
+char *opt_ssl_capath = nullptr;
+char *opt_ssl_cert = nullptr;
+char *opt_ssl_cipher = nullptr;
+char *opt_tls_ciphersuites = nullptr;
+char *opt_ssl_key = nullptr;
+char *opt_ssl_crl = nullptr;
+char *opt_ssl_crlpath = nullptr;
+char *opt_tls_version = nullptr;
+ulong opt_ssl_fips_mode = SSL_FIPS_MODE_OFF;
+bool ssl_mode_set_explicitly = false;
+char *opt_ssl_session_data = nullptr;
+bool opt_ssl_session_data_continue_on_failed_reuse = false;
+
+int set_client_ssl_options(MYSQL *mysql) {
+#endif
   /*
     Print a warning if explicitly defined combination of --ssl-mode other than
     VERIFY_CA or VERIFY_IDENTITY with explicit --ssl-ca or --ssl-capath values.
