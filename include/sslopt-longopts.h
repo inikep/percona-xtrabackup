@@ -25,7 +25,7 @@
 */
 
 #if defined(HAVE_OPENSSL)
-#ifndef MYSQL_SERVER
+#if !defined(MYSQL_SERVER) || defined(XTRABACKUP)
 {"ssl-mode",
  OPT_SSL_MODE,
  "SSL connection mode.",
