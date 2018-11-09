@@ -24,7 +24,9 @@
   @file include/sslopt-case.h
 */
 
-#ifdef MYSQL_SERVER
+#if defined(HAVE_OPENSSL)
+
+#if defined(MYSQL_SERVER) && !defined(XTRABACKUP)
 #error This header is supposed to be used only in the client
 #endif
 
