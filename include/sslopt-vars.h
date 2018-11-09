@@ -35,7 +35,7 @@
 #include "template_utils.h"
 #include "typelib.h"
 
-#ifdef MYSQL_SERVER
+#if defined(MYSQL_SERVER) && !defined(XTRABACKUP)
 #error This header is supposed to be used only in the client
 #endif
 
