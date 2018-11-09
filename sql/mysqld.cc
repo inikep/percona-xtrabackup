@@ -1855,9 +1855,11 @@ bool dynamic_plugins_are_initialized = false;
 static const char *default_dbug_option;
 #endif
 
+#ifndef XTRABACKUP
 bool opt_use_ssl = true;
 bool opt_use_admin_ssl = true;
 ulong opt_ssl_fips_mode = SSL_FIPS_MODE_OFF;
+#endif
 
 /* Function declarations */
 
@@ -5135,6 +5137,7 @@ static void init_ssl() {
 }
 
 static int init_ssl_communication() {
+#if !defined(XTRABACKUP)
   char ssl_err_string[OPENSSL_ERROR_LENGTH] = {'\0'};
   int ret_fips_mode = set_fips_mode(opt_ssl_fips_mode, ssl_err_string);
   if (ret_fips_mode != 1) {
@@ -5170,6 +5173,7 @@ static int init_ssl_communication() {
       LogErr(SYSTEM_LEVEL, ER_TLS_CONFIGURATION_REUSED,
              mysql_admin_channel.c_str(), mysql_main_channel.c_str());
   }
+#endif
 
 #if OPENSSL_VERSION_NUMBER < 0x10100000L
   ERR_remove_thread_state(0);
@@ -8491,6 +8495,7 @@ struct my_option my_long_options[] = {
      "Option used by mysql-test for debugging and testing of replication.",
      &opt_sporadic_binlog_dump_fail, &opt_sporadic_binlog_dump_fail, 0,
      GET_BOOL, NO_ARG, 0, 0, 0, nullptr, 0, nullptr},
+#ifndef XTRABACKUP
     {"ssl", 0,
      "Enable SSL for connection (automatically enabled with other flags).",
      &opt_use_ssl, &opt_use_ssl, nullptr, GET_BOOL, OPT_ARG, 1, 0, 0, nullptr,
@@ -8499,6 +8504,7 @@ struct my_option my_long_options[] = {
      "Enable SSL for admin interface (automatically enabled with other flags).",
      &opt_use_admin_ssl, &opt_use_admin_ssl, nullptr, GET_BOOL, OPT_ARG, 1, 0,
      0, nullptr, 0, nullptr},
+#endif /* XTRABACKUP */
 #ifdef _WIN32
     {"standalone", 0, "Dummy option to start as a standalone program (NT).", 0,
      0, 0, GET_NO_ARG, NO_ARG, 0, 0, 0, 0, 0, 0},
@@ -9743,6 +9749,7 @@ bool mysqld_get_one_option(int optid,
     case OPT_BINLOG_EXPIRE_LOGS_SECONDS:
       binlog_expire_logs_seconds_supplied = true;
       break;
+#ifndef XTRABACKUP
     case OPT_SSL_KEY:
     case OPT_SSL_CERT:
     case OPT_SSL_CA:
@@ -9774,6 +9781,7 @@ bool mysqld_get_one_option(int optid,
       g_admin_ssl_configured = true;
       opt_use_admin_ssl = true;
       break;
+#endif /* XTRABACKUP */
     case 'V':
       print_server_version();
       exit(MYSQLD_SUCCESS_EXIT);
