@@ -10533,7 +10533,7 @@ byte *fil_tablespace_redo_rename(byte *ptr, const byte *end,
   if (!srv_backup_mode) {
     bool success;
     if (fil_tablespace_open_for_recovery(page_id.space()) != DB_SUCCESS) {
-      ib::info() << "Rename failed. Cannot find'" << from_name << "'!";
+      ib::info() << "Rename failed. Cannot find '" << from_name << "'!";
       return (ptr);
     }
 

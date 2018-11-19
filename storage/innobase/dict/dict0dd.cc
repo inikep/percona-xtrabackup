@@ -1576,13 +1576,10 @@ reopen:
         dict_sys_mutex_exit();
       }
     } else {
-      dict_sys_mutex_exit();
-
-      ib_table = dd_table_open_on_id_low(thd, mdl, table_id);
-
-      if (dict_locked) {
-        dict_sys_mutex_enter();
+      if (!dict_locked) {
+        mutex_exit(&dict_sys->mutex);
       }
+      ib_table = nullptr;
     }
 #else  /* !UNIV_HOTBACKUP */
     /* PRELIMINARY TEMPORARY WORKAROUND: is this ever used? */
