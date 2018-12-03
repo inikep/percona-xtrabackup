@@ -454,6 +454,27 @@ dict_table_t *dd_table_create_on_dd_obj(const dd::Table *dd_table,
     table->flags |= DICT_TF_MASK_DATA_DIR;
   }
 
+  /* If the table has instantly added columns, it's necessary to read
+  the number of instant columns for either normal table(from dd::Table),
+  or partitioned table(from dd::Partition). One partition may have no
+  instant columns, which is fine. */
+  if (dd_table_has_instant_cols(*dd_table)) {
+    uint32_t instant_cols;
+
+    if (dd_part == nullptr) {
+      dd_table->se_private_data().get(
+          dd_table_key_strings[DD_TABLE_INSTANT_COLS], &instant_cols);
+      table->set_instant_cols(instant_cols);
+      ut_ad(table->has_instant_cols());
+    } else if (dd_part_has_instant_cols(*dd_part)) {
+      dd_part->se_private_data().get(
+          dd_partition_key_strings[DD_PARTITION_INSTANT_COLS], &instant_cols);
+
+      table->set_instant_cols(instant_cols);
+      ut_ad(table->has_instant_cols());
+    }
+  }
+
   /* Check if this table is FTS AUX table, if so, set DICT_TF2_AUX flag */
   fts_aux_table_t aux_table;
   if (fts_is_aux_table_name(&aux_table, table_name, strlen(table_name))) {
@@ -483,7 +504,7 @@ dict_table_t *dd_table_create_on_dd_obj(const dd::Table *dd_table,
   /* Set encryption option. */
   dd::String_type encrypt;
   if (dd_table->table().options().exists("encrypt_type")) {
-    dd_table->table().options().get("encrypt_type", encrypt);
+    dd_table->table().options().get("encrypt_type", &encrypt);
     if (!Encryption::is_none(encrypt.c_str())) {
       ut_ad(innobase_strcasecmp(encrypt.c_str(), "y") == 0);
       is_encrypted = true;
@@ -493,7 +514,7 @@ dict_table_t *dd_table_create_on_dd_obj(const dd::Table *dd_table,
   /* Check discard flag. */
   const dd::Properties &p = dd_table->table().se_private_data();
   if (p.exists(dd_table_key_strings[DD_TABLE_DISCARD])) {
-    p.get_bool(dd_table_key_strings[DD_TABLE_DISCARD], &is_discard);
+    p.get(dd_table_key_strings[DD_TABLE_DISCARD], &is_discard);
   }
 
   if (is_discard) {
@@ -601,7 +622,7 @@ dict_table_t *dd_table_create_on_dd_obj(const dd::Table *dd_table,
       const dd::Properties &p = dd_col->se_private_data();
       if (p.exists("nullable")) {
         bool nullable;
-        p.get_bool("nullable", &nullable);
+        p.get("nullable", &nullable);
         nulls_allowed = nullable ? 0 : DATA_NOT_NULL;
       }
     }
@@ -859,8 +880,8 @@ dict_table_t *dd_table_create_on_dd_obj(const dd::Table *dd_table,
     const dd::Properties &p = dd_table->table().se_private_data();
     dict_table_autoinc_set_col_pos(table, i - 1);
     uint64 version, autoinc = 0;
-    if (p.get_uint64(dd_table_key_strings[DD_TABLE_VERSION], &version) ||
-        p.get_uint64(dd_table_key_strings[DD_TABLE_AUTOINC], &autoinc)) {
+    if (p.get(dd_table_key_strings[DD_TABLE_VERSION], &version) ||
+        p.get(dd_table_key_strings[DD_TABLE_AUTOINC], &autoinc)) {
       ut_ad(!"problem setting AUTO_INCREMENT");
       return (nullptr);
     }
@@ -893,17 +914,14 @@ dict_table_t *dd_table_create_on_dd_obj(const dd::Table *dd_table,
     } else if (dd_table->tablespace_id() == dict_sys_t::s_dd_temp_space_id) {
       sid = dict_sys_t::s_temp_space_id;
     } else {
-      if (se_private_data.get_uint32(dd_index_key_strings[DD_INDEX_SPACE_ID],
-                                     &sid)) {
+      if (se_private_data.get(dd_index_key_strings[DD_INDEX_SPACE_ID], &sid)) {
         return (nullptr);
       }
     }
 
-    if (se_private_data.get_uint64(dd_index_key_strings[DD_INDEX_ID], &id) ||
-        se_private_data.get_uint32(dd_index_key_strings[DD_INDEX_ROOT],
-                                   &root) ||
-        se_private_data.get_uint64(dd_index_key_strings[DD_INDEX_TRX_ID],
-                                   &trx_id)) {
+    if (se_private_data.get(dd_index_key_strings[DD_INDEX_ID], &id) ||
+        se_private_data.get(dd_index_key_strings[DD_INDEX_ROOT], &root) ||
+        se_private_data.get(dd_index_key_strings[DD_INDEX_TRX_ID], &trx_id)) {
       return (nullptr);
     }
 
@@ -961,10 +979,10 @@ table_id_t dd_table_id_and_part(space_id_t space_id, const dd::Table &dd_table,
         uint64 prop_space_id;
 
         dd::Properties &p = index->se_private_data();
-        p.get_uint64(dd_index_key_strings[DD_INDEX_SPACE_ID], &prop_space_id);
+        p.get(dd_index_key_strings[DD_INDEX_SPACE_ID], &prop_space_id);
 
         if (prop_space_id == space_id) {
-          p.get_uint64(dd_index_key_strings[DD_TABLE_ID], &table_id);
+          p.get(dd_index_key_strings[DD_TABLE_ID], &table_id);
           dd_part = part;
           goto done;
         }
