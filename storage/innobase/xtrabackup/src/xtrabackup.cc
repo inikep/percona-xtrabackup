@@ -7065,9 +7065,7 @@ skip_check:
 
       mutex_enter(&(dict_sys->mutex));
       if (!table) {
-        msg("xtrabackup: error: "
-            "cannot find dictionary "
-            "record of table %s\n",
+        msg("xtrabackup: error: cannot find dictionary record of table %s\n",
             space->name);
         goto next_node;
       }
