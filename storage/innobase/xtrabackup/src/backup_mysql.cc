@@ -189,6 +189,8 @@ MYSQL *xb_mysql_connect() {
 
   xb_mysql_query(connection, "SET SESSION autocommit=1", false, true);
 
+  xb_mysql_query(connection, "SET NAMES utf8", false, true);
+
   return (connection);
 }
 
