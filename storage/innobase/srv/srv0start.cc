@@ -2049,7 +2049,7 @@ dberr_t srv_start(bool create_new_db, lsn_t to_lsn) {
     return (srv_init_abort(err));
   }
 
-  err = fil_scan_for_tablespaces();
+  err = fil_scan_for_tablespaces(false);
 
   if (err != DB_SUCCESS) {
     return (srv_init_abort(err));
