@@ -26,6 +26,7 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA
 #define FIL_CUR_H
 
 #include <my_dir.h>
+#include "fil0fil.h"
 #include "read_filt.h"
 
 struct xb_fil_cur_t {
@@ -123,11 +124,8 @@ For system tablepsaces (i.e. When is_system is true) both "/remote/dir/ibdata1"
 and "./ibdata1" yield "ibdata1" in the output. */
 const char *xb_get_relative_path(
     /*=================*/
-    ulint flags,      /*!< in: tablespace flags */
-    const char *path, /*!< in: tablespace path (either
-                      relative or absolute) */
-    bool is_system);  /*!< in: TRUE for system tablespaces,
-                      i.e. when only the filename must be
-                      returned. */
+    fil_space_t *space, /*!< in: tablespace */
+    const char *path);  /*!< in: tablespace path (either
+                        relative or absolute) */
 
 #endif

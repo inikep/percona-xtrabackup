@@ -201,16 +201,6 @@ Destroy the tablespace memory cache. */
 void xb_data_files_close(void);
 
 /************************************************************************
-Checks if a table specified as a name in the form "database/name" (InnoDB 5.6)
-or "./database/name.ibd" (InnoDB 5.5-) should be skipped from backup based on
-the --tables or --tables-file options.
-
-@return TRUE if the table should be skipped. */
-bool check_if_skip_table(
-    /******************/
-    const char *name); /*!< in: path to the table */
-
-/************************************************************************
 Checks if a database specified by path should be skipped from backup based on
 the --databases, --databases_file or --databases_exclude options.
 

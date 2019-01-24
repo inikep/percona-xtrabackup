@@ -2162,6 +2162,16 @@ or MLOG_FILE_RENAME record. These could not be recovered
 ignore redo log records during the apply phase */
 [[nodiscard]] bool fil_check_missing_tablespaces();
 
+/** Open tablespace file for backup.
+@param[in]  path  file path.
+@param[in]  name  space name.
+@return DB_SUCCESS if all OK */
+dberr_t fil_open_for_xtrabackup(const std::string &path,
+                                const std::string &name);
+
+/** Open all known tablespaces. */
+void fil_open_ibds();
+
 /** Normalize and save a directory to scan for datafiles.
 @param[in]  directory    directory to scan for ibd and ibu files
 @param[in]  is_undo_dir  true for an undo directory */

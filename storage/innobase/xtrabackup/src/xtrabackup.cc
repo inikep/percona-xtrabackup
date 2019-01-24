@@ -288,6 +288,7 @@ longlong innobase_page_size = (1LL << 14); /* 16KB */
 static ulong innobase_log_block_size = 512;
 char *innobase_doublewrite_file = NULL;
 char *innobase_buffer_pool_filename = NULL;
+char *innobase_directories = NULL;
 
 longlong innobase_buffer_pool_size = 8 * 1024 * 1024L;
 longlong innobase_log_file_size = 48 * 1024 * 1024L;
@@ -608,6 +609,7 @@ enum options_xtrabackup {
   OPT_XTRA_REBUILD_THREADS,
   OPT_INNODB_CHECKSUM_ALGORITHM,
   OPT_INNODB_UNDO_DIRECTORY,
+  OPT_INNODB_DIRECTORIES,
   OPT_INNODB_TEMP_TABLESPACE_DIRECTORY,
   OPT_INNODB_UNDO_TABLESPACES,
   OPT_INNODB_LOG_CHECKSUMS,
@@ -1337,6 +1339,12 @@ Disable with --skip-innodb-doublewrite.",
      "Directory where undo tablespace files live, this path can be absolute.",
      &srv_undo_dir, &srv_undo_dir, 0, GET_STR_ALLOC, REQUIRED_ARG, 0, 0, 0, 0,
      0, 0},
+    {"innodb_directories", OPT_INNODB_DIRECTORIES,
+     "List of directories 'dir1;dir2;..;dirN' to scan for tablespace files. "
+     "Default is to scan 'innodb-data-home-dir;innodb-undo-directory;datadir'",
+     &srv_innodb_directories, &srv_innodb_directories, 0, GET_STR_ALLOC,
+
+     REQUIRED_ARG, 0, 0, 0, 0, 0, 0},
     {"temp_tablespaces_dir", OPT_INNODB_TEMP_TABLESPACE_DIRECTORY,
      "Directory where temp tablespace files live, this path can be absolute.",
      &srv_temp_dir, &srv_temp_dir, 0, GET_STR_ALLOC, REQUIRED_ARG, 0, 0, 0, 0,
@@ -2018,6 +2026,10 @@ static bool innodb_init_param(void) {
     srv_undo_dir = my_strdup(PSI_NOT_INSTRUMENTED, ".", MYF(MY_FAE));
   }
 
+  ut_ad(srv_undo_dir != nullptr);
+  Fil_path::normalize(srv_undo_dir);
+  MySQL_undo_path = Fil_path{srv_undo_dir};
+
   /* We want to save original value of srv_temp_dir because InnoDB will
   modify ibt::srv_temp_dir. */
   ibt::srv_temp_dir = srv_temp_dir;
@@ -2034,8 +2046,6 @@ error:
   msg("xtrabackup: innodb_init_param(): Error occured.\n");
   return (true);
 }
-
-typedef bool (*load_table_predicate_t)(const char *, const char *);
 
 dberr_t dict_load_tables_from_space_id(space_id_t space_id, THD *thd,
                                        ib_trx_t trx) {
@@ -2138,8 +2148,32 @@ error:
   return (err);
 }
 
+static void xb_scan_for_tablespaces() {
+  /* This is the default directory for IBD and IBU files. Put it first
+  in the list of known directories. */
+  fil_set_scan_dir(MySQL_datadir_path.path());
+
+  /* Add --innodb-data-home-dir as a known location for IBD and IBU files
+  if it is not already there. */
+  ut_ad(srv_data_home != nullptr && *srv_data_home != '\0');
+  fil_set_scan_dir(Fil_path::remove_quotes(srv_data_home));
+
+  /* Add --innodb-directories as known locations for IBD and IBU files. */
+  if (srv_innodb_directories != nullptr && *srv_innodb_directories != 0) {
+    fil_set_scan_dirs(Fil_path::remove_quotes(srv_innodb_directories));
+  }
+
+  /* For the purpose of file discovery at startup, we need to scan
+  --innodb-undo-directory also. */
+  fil_set_scan_dir(Fil_path::remove_quotes(MySQL_undo_path), true);
+
+  msg("xtrabackup: Generating a list of tablespaces\n");
+
+  fil_scan_for_tablespaces(true);
+}
+
 static void dict_load_from_spaces_sdi() {
-  msg("Populating InnoDB table cache.\n");
+  fil_open_ibds();
 
   my_thread_init();
 
@@ -2752,16 +2786,14 @@ static bool xtrabackup_copy_datafile(fil_node_t *node, uint thread_n) {
 
   if (write_filter->init != NULL &&
       !write_filter->init(&write_filt_ctxt, dst_name, &cursor)) {
-    msg("[%02u] xtrabackup: error: "
-        "failed to initialize page write filter.\n",
+    msg("[%02u] xtrabackup: error: failed to initialize page write filter.\n",
         thread_n);
     goto error;
   }
 
   dstfile = ds_open(ds_data, dst_name, &cursor.statinfo);
   if (dstfile == NULL) {
-    msg("[%02u] xtrabackup: error: "
-        "cannot open the destination stream for %s\n",
+    msg("[%02u] xtrabackup: error: cannot open the destination stream for %s\n",
         thread_n, dst_name);
     goto error;
   }
@@ -2870,9 +2902,7 @@ static void data_copy_thread_func(data_thread_ctxt_t *ctxt) {
   while ((node = datafiles_iter_next(ctxt->it)) != NULL && !*(ctxt->error)) {
     /* copy the datafile */
     if (xtrabackup_copy_datafile(node, num)) {
-      msg("[%02u] xtrabackup: Error: "
-          "failed to copy datafile.\n",
-          num);
+      msg("[%02u] xtrabackup: Error: failed to copy datafile.\n", num);
       *(ctxt->error) = true;
     }
   }
@@ -3024,8 +3054,6 @@ static void xb_fil_io_init(void)
   fsp_init();
 }
 
-typedef bool (*load_table_predicate_t)(const char *, const char *);
-
 /****************************************************************************
 Populates the tablespace memory cache by scanning for and opening data files.
 @returns DB_SUCCESS or error code.*/
@@ -3068,6 +3096,7 @@ static dberr_t xb_load_tablespaces(void)
   }
 
   msg("xtrabackup: Generating a list of tablespaces\n");
+  xb_scan_for_tablespaces();
 
   /* Add separate undo tablespaces to fil_system */
 
@@ -3076,11 +3105,10 @@ static dberr_t xb_load_tablespaces(void)
     return (err);
   }
 
-  /* It is important to call fil_load_single_table_tablespace() after
-  srv_undo_tablespaces_init(), because fsp_is_ibd_tablespace() *
-  relies on srv_undo_tablespaces_open to be properly initialized */
-
-  msg("xtrabackup: Generating a list of tablespaces\n");
+  for (auto tablespace : Tablespace_map::instance().external_files()) {
+    if (tablespace.type != Tablespace_map::TABLESPACE) continue;
+    fil_open_for_xtrabackup(tablespace.file_name, tablespace.name);
+  }
 
   debug_sync_point("xtrabackup_load_tablespaces_pause");
 
@@ -3096,6 +3124,7 @@ ulint xb_data_files_init(void)
 {
   os_create_block_cache();
   xb_fil_io_init();
+  undo_spaces_init();
 
   return (xb_load_tablespaces());
 }
