@@ -25,6 +25,10 @@ XA END 'xatrx';
 XA PREPARE 'xatrx';
 EOF
 
+# Let the client complete the above set of statements
+vlog "waiting for 3 seconds to ensure transaction on XA prepared state"
+sleep 3
+
 xtrabackup --backup --target-dir=$topdir/full
 
 # Terminate the background client
@@ -32,7 +36,11 @@ echo "exit" >&3
 exec 3>&-
 wait $client_pid
 
-xtrabackup --prepare --target-dir=$topdir/full
+xtrabackup --prepare --target-dir=$topdir/full --rollback-prepared-trx
+
+if ! egrep -q "Rollback of trx with id [0-9]+ completed" $OUTFILE ; then
+  die "XA prepared transaction was not rolled back!"
+fi
 
 stop_server
 
