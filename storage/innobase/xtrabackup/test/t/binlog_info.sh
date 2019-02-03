@@ -2,6 +2,8 @@
 # binlog-info tests
 ########################################################################
 
+require_server_version_higher_than 8.0.16
+
 function test_binlog_info() {
 
     start_server $@
@@ -26,9 +28,6 @@ EOF
     INSERT INTO t VALUES (1), (2), (3);
 EOF
 
-    binlog_file=`get_binlog_file`
-    binlog_pos=`get_binlog_pos`
-
     if [ $gtid = 1 ] ; then
         gtid_executed=`get_gtid_executed`
     fi
@@ -37,6 +36,10 @@ EOF
     xb_binlog_info_innodb=$topdir/backup/xtrabackup_binlog_pos_innodb
 
     xtrabackup --backup --target-dir=$topdir/backup
+
+    binlog_file=`get_binlog_file`
+    binlog_pos=`get_binlog_pos`
+
     verify_binlog_info_on
 
     rm -rf $topdir/backup
@@ -58,27 +61,31 @@ function verify_binlog_info_on()
 
     if [ $gtid = 1 ]
     then
-		diff $xb_binlog_info - <<EOF
+		run_cmd diff -u $xb_binlog_info - <<EOF
 $binlog_file	$binlog_pos	$gtid_executed
 EOF
 	else
-		diff $xb_binlog_info - <<EOF
+		run_cmd diff -u $xb_binlog_info - <<EOF
 $binlog_file	$binlog_pos
 EOF
 	fi
     xtrabackup --prepare --target-dir=$topdir/backup
+
+    if ! [ -f $xb_binlog_info_innodb ] ; then
+        return
+    fi
 
     normalize_path $xb_binlog_info_innodb
 
     if [ $bsbi_avail = 1 ]
     then
         # Real coordinates in xtrabackup_binlog_pos_innodb
-        diff $xb_binlog_info_innodb - <<EOF
+        run_cmd diff -u $xb_binlog_info_innodb - <<EOF
 $binlog_file	$binlog_pos
 EOF
     else
         # Stale coordinates in xtrabackup_binlog_pos_innodb
-        diff $xb_binlog_info_innodb - <<EOF
+        run_cmd diff -u $xb_binlog_info_innodb - <<EOF
 $binlog_file_innodb	$binlog_pos_innodb
 EOF
     fi
@@ -86,7 +93,5 @@ EOF
 
 test_binlog_info
 
-if is_server_version_higher_than 5.6.0 ; then
-    test_binlog_info --gtid-mode=ON --enforce-gtid-consistency=ON \
-                     --log-bin --log-slave-updates
-fi
+test_binlog_info --gtid-mode=ON --enforce-gtid-consistency=ON \
+                 --log-bin --log-slave-updates
