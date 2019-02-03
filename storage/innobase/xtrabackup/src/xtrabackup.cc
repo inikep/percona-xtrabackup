@@ -288,7 +288,6 @@ longlong innobase_page_size = (1LL << 14); /* 16KB */
 static ulong innobase_log_block_size = 512;
 char *innobase_doublewrite_file = NULL;
 char *innobase_buffer_pool_filename = NULL;
-char *innobase_directories = NULL;
 
 longlong innobase_buffer_pool_size = 8 * 1024 * 1024L;
 longlong innobase_log_file_size = 48 * 1024 * 1024L;
@@ -559,6 +558,7 @@ enum options_xtrabackup {
   OPT_XTRA_ENCRYPT_CHUNK_SIZE,
   OPT_XTRA_SERVER_ID,
   OPT_LOG,
+  OPT_LOG_BIN_INDEX,
   OPT_INNODB,
   OPT_INNODB_CHECKSUMS,
   OPT_INNODB_DATA_FILE_PATH,
@@ -634,6 +634,7 @@ enum options_xtrabackup {
   OPT_NO_VERSION_CHECK,
 #endif
   OPT_NO_BACKUP_LOCKS,
+  OPT_ROLLBACK_PREPARED_TRX,
   OPT_DECOMPRESS,
   OPT_INCREMENTAL_HISTORY_NAME,
   OPT_INCREMENTAL_HISTORY_UUID,
@@ -995,6 +996,11 @@ struct my_option xb_client_options[] = {
      (uchar *)&opt_no_backup_locks, (uchar *)&opt_no_backup_locks, 0, GET_BOOL,
      NO_ARG, 0, 0, 0, 0, 0, 0},
 
+    {"rollback-prepared-trx", OPT_ROLLBACK_PREPARED_TRX,
+     "Force rollback prepared InnoDB transactions.",
+     (uchar *)&srv_rollback_prepared_trx, (uchar *)&srv_rollback_prepared_trx,
+     0, GET_BOOL, NO_ARG, 0, 0, 0, 0, 0, 0},
+
     {"decompress", OPT_DECOMPRESS,
      "Decompresses all files with the .qp "
      "extension in a backup previously made with the --compress option.",
@@ -1183,6 +1189,10 @@ struct my_option xb_server_options[] = {
 
     {"log_bin", OPT_LOG, "Base name for the log sequence", &opt_log_bin,
      &opt_log_bin, 0, GET_STR_ALLOC, OPT_ARG, 0, 0, 0, 0, 0, 0},
+
+    {"log-bin-index", OPT_LOG_BIN_INDEX,
+     "File that holds the names for binary log files.", &opt_binlog_index_name,
+     &opt_binlog_index_name, 0, GET_STR, REQUIRED_ARG, 0, 0, 0, 0, 0, 0},
 
     {"innodb", OPT_INNODB, "Ignored option for MySQL option compatibility",
      (G_PTR *)&innobase_ignored_opt, (G_PTR *)&innobase_ignored_opt, 0, GET_STR,
@@ -2239,6 +2249,10 @@ static bool innodb_init(bool init_dd, bool for_apply_log) {
   }
 
   srv_start_threads();
+
+  if (srv_thread_is_active(srv_threads.m_trx_recovery_rollback)) {
+    srv_threads.m_trx_recovery_rollback.wait();
+  }
 
   innodb_inited = 1;
 
