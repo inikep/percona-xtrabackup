@@ -431,6 +431,34 @@ bool Rpl_encryption::enable(THD *thd) {
   return res;
 }
 
+bool Rpl_encryption::enable_for_xtrabackup() {
+  DBUG_ENTER("Rpl_encryption::enable_for_xtrabackup");
+  DBUG_ASSERT(m_initialized);
+
+  m_enabled = true;
+  m_skip_logs_rotation = true;
+
+  bool res = false;
+  /* Recover master key if not recovered yet */
+  if (!m_master_key_recovered) res = recover_master_key();
+
+  if (!res) {
+    m_master_key.m_id =
+        Rpl_encryption_header::seqno_to_key_id(m_master_key_seqno);
+    auto master_key =
+        get_key(m_master_key.m_id, Rpl_encryption_header::get_key_type());
+    m_master_key.m_value.assign(master_key.second);
+    /* No keyring error */
+    if (master_key.first == Keyring_status::KEYRING_ERROR_FETCHING) res = true;
+  }
+
+  if (m_master_key_seqno == 0)
+    res = rotate_master_key(Key_rotation_step::START, 0);
+
+  DBUG_PRINT("debug", ("m_enabled= %s", m_enabled ? "true" : "false"));
+  DBUG_RETURN(res);
+}
+
 void Rpl_encryption::disable(THD *thd) {
   DBUG_TRACE;
   DBUG_ASSERT(m_initialized);
@@ -1156,7 +1184,7 @@ int Rpl_encryption_header_v1::get_header_size() {
 Key_string Rpl_encryption_header_v1::decrypt_file_password() {
   DBUG_TRACE;
   Key_string file_password;
-#ifdef MYSQL_SERVER
+#if defined(MYSQL_SERVER) || defined(XTRABACKUP)
   if (!m_key_id.empty()) {
     auto error_and_key =
         Rpl_encryption::get_key(m_key_id, KEY_TYPE, KEY_LENGTH);
@@ -1187,7 +1215,7 @@ std::unique_ptr<Stream_cipher> Rpl_encryption_header_v1::get_decryptor() {
   return Aes_ctr::get_decryptor();
 }
 
-#ifdef MYSQL_SERVER
+#if defined(MYSQL_SERVER) || defined(XTRABACKUP)
 bool Rpl_encryption_header_v1::encrypt_file_password(Key_string password_str) {
   DBUG_TRACE;
   bool error = false;
