@@ -38,7 +38,7 @@ extern bool use_dumped_tablespace_keys;
 @param[in]  space_id    tablespace id
 @param[in]  key     tablespace key
 @param[in]  key     tablespace iv */
-void xb_insert_tablespace_key(ulint space_id, byte *key, byte *iv);
+void xb_insert_tablespace_key(ulint space_id, const byte *key, const byte *iv);
 
 /** Fetch tablespace key from "xtrabackup_keys" and set the encryption
 type for the tablespace.

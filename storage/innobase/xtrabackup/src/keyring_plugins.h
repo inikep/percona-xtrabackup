@@ -73,6 +73,23 @@ bool xb_tablespace_keys_load(const char *dir, const char *transition_key,
 bool xb_tablespace_keys_dump(ds_ctxt_t *ds_ctxt, const char *transition_key,
                              size_t transition_key_len);
 
+/**
+  Store binlog password into a backup
+
+  @param[in]  binlog_file_path  binlog file path
+  @return     true if success
+*/
+bool xb_binlog_password_store(const char *binlog_file_path);
+
+/**
+  Reencrypt the password in the binlog file header and store the master
+  key int a keyring.
+
+  @param[in]  binlog_file_path  binlog file path
+  @return     true if success
+*/
+bool xb_binlog_password_reencrypt(const char *binlog_file_path);
+
 /** Shutdown keyring plugins. */
 void xb_keyring_shutdown();
 
