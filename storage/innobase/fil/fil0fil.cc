@@ -11397,6 +11397,8 @@ byte *fil_tablespace_redo_encryption(byte *ptr, const byte *end,
       might be needed. It will be reset when this REDO record is applied. */
       return (ptr);
     }
+    bool found = xb_fetch_tablespace_key(space_id, key, iv);
+    ut_a(found);
   }
 
   byte iv[Encryption::KEY_LEN] = {0};
