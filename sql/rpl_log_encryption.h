@@ -87,7 +87,7 @@ class THD;
       password stored in an encrypted replication file header. It is generated
       by keyring and stored in/retrieved from keyring.
 */
-#ifdef MYSQL_SERVER
+#if defined(MYSQL_SERVER) || defined(XTRABACKUP)
 
 /**
   The Rpl_encryption class is the container for the binlog encryption feature
@@ -236,6 +236,14 @@ class Rpl_encryption {
     @retval true Error. If error happens when generating new key, it will fail.
   */
   bool enable(THD *thd);
+  /**
+    Enable binlog encryption for xtrabackup. It will generate a new global key
+    if there is no master key yet.
+
+    @retval     true  Error. If error happens when generating new key, it will
+                      fail.
+  */
+  bool enable_for_xtrabackup();
   /**
     Disable binlog encryption option. It rotates replication logs to make
     encryption ineffective immediately.
@@ -646,7 +654,7 @@ class Rpl_encryption_header {
     @return The new file password, or an empty password if error happens.
   */
   virtual Key_string generate_new_file_password() = 0;
-#ifdef MYSQL_SERVER
+#if defined(MYSQL_SERVER) || defined(XTRABACKUP)
   /**
     Encrypt a file password using current replication encryption master key.
 
@@ -782,7 +790,7 @@ class Rpl_encryption_header_v1 : public Rpl_encryption_header {
   std::unique_ptr<Stream_cipher> get_encryptor() override;
   std::unique_ptr<Stream_cipher> get_decryptor() override;
   Key_string generate_new_file_password() override;
-#ifdef MYSQL_SERVER
+#if defined(MYSQL_SERVER) || defined(XTRABACKUP)
   bool encrypt_file_password(Key_string password_str) override;
 #endif
 

@@ -10655,7 +10655,8 @@ byte *fil_tablespace_redo_encryption(byte *ptr, const byte *end,
     if (Encryption::get_master_key_id() < master_key_id) {
       Encryption::set_master_key(master_key_id);
     }
-    xb_fetch_tablespace_key(space_id, key, iv);
+    bool found = xb_fetch_tablespace_key(space_id, key, iv);
+    ut_a(found);
   }
 
   ut_ad(len == Encryption::INFO_SIZE);
