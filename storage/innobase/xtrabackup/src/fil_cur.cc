@@ -306,6 +306,11 @@ read_retry:
   }
   Encryption_metadata encryption_metadata;
 
+  Encryption::set_or_generate(Encryption::AES, cursor->encryption_key,
+                              cursor->encryption_iv, encryption_metadata);
+
+  read_request.get_encryption_info().set(encryption_metadata);
+
   npages = n_read >> cursor->page_size_shift;
 
   /* check pages for corruption and re-read if necessary. i.e. in case of
