@@ -8287,13 +8287,18 @@ dberr_t Fil_shard::do_io(const IORequest &type, bool sync,
       return DB_ERROR;
     }
 
-    /* This is a hard error. */
-    fil_report_invalid_page_access(page_id.page_no(), page_id.space(),
-                                   space->name, byte_offset, len,
-                                   req_type.is_read());
-  }
+    /* Extend the file if the page_no does not fall inside its bounds;
+       because xtrabackup may have copied it when it was smaller */
+      mutex_release();
 
-  mutex_release();
+      bool success = space_extend(space, page_no + 1);
+
+      if (!success) {
+        return (DB_ERROR);
+      }
+    } else {
+      mutex_release();
+  }
 
   DEBUG_SYNC_C("innodb_fil_do_io_prepared_io_with_no_mutex");
 
