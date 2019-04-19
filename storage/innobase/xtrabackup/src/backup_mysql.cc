@@ -353,6 +353,7 @@ void parse_show_engine_innodb_status(MYSQL *connection) {
     while (std::getline(data, line)) {
       lsn_t lsn;
       if (sscanf(line.c_str(), "Log flushed up to " LSN_PF, &lsn) == 1) {
+        backup_redo_log_flushed_lsn = lsn;
       }
     }
   }

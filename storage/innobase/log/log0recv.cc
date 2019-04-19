@@ -98,6 +98,7 @@ recv_sys_t *recv_sys = nullptr;
 otherwise.  Note that this is false while a background thread is
 rolling back incomplete transactions. */
 volatile bool recv_recovery_on;
+volatile lsn_t backup_redo_log_flushed_lsn;
 
 #ifdef UNIV_HOTBACKUP
 std::list<std::pair<space_id_t, lsn_t>> index_load_list;
@@ -1580,28 +1581,46 @@ static byte *recv_parse_or_apply_log_rec_body(
 
       return fil_tablespace_redo_delete(
           ptr, end_ptr, page_id_t(space_id, page_no), parsed_bytes,
-          recv_sys->bytes_to_ignore_before_checkpoint != 0);
+          recv_sys->bytes_to_ignore_before_checkpoint !=
+              0 IF_XB(|| recv_sys->recovered_lsn + parsed_bytes <
+                             backup_redo_log_flushed_lsn));
 
     case MLOG_FILE_CREATE:
 
       return fil_tablespace_redo_create(
           ptr, end_ptr, page_id_t(space_id, page_no), parsed_bytes,
-          recv_sys->bytes_to_ignore_before_checkpoint != 0);
+          recv_sys->bytes_to_ignore_before_checkpoint !=
+              0 IF_XB(|| recv_sys->recovered_lsn + parsed_bytes <
+                             backup_redo_log_flushed_lsn));
 
     case MLOG_FILE_RENAME:
 
       return fil_tablespace_redo_rename(
           ptr, end_ptr, page_id_t(space_id, page_no), parsed_bytes,
-          recv_sys->bytes_to_ignore_before_checkpoint != 0);
+          recv_sys->bytes_to_ignore_before_checkpoint !=
+              0 IF_XB(|| recv_sys->recovered_lsn + parsed_bytes <
+                             backup_redo_log_flushed_lsn));
 
     case MLOG_FILE_EXTEND:
 
       return fil_tablespace_redo_extend(
           ptr, end_ptr, page_id_t(space_id, page_no), parsed_bytes,
-          recv_sys->bytes_to_ignore_before_checkpoint != 0);
+          recv_sys->bytes_to_ignore_before_checkpoint !=
+              0 IF_XB(|| recv_sys->recovered_lsn + parsed_bytes <
+                             backup_redo_log_flushed_lsn));
 #endif /* !UNIV_HOTBACKUP */
     case MLOG_INDEX_LOAD:
-
+#ifdef UNIV_HOTBACKUP
+      // While scanning redo logs during a backup operation a
+      // MLOG_INDEX_LOAD type redo log record indicates, that a DDL
+      // (create index, alter table...) is performed with
+      // 'algorithm=inplace'. The affected tablespace must be re-copied
+      // in the backup lock phase. Record it in the index_load_list.
+      if (!recv_recovery_on) {
+        index_load_list.emplace_back(
+            std::pair<space_id_t, lsn_t>(space_id, recv_sys->recovered_lsn));
+      }
+#endif /* UNIV_HOTBACKUP */
       if (end_ptr < ptr + 8) {
         return nullptr;
       }
