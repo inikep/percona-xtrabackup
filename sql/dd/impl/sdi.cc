@@ -426,6 +426,7 @@ bool CheckDefaultCompatibility(const RJ_Document &doc) {
              SDI_VERSION);
     return true;
   }
+#endif
   return false;
 }
 
