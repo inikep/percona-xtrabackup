@@ -32,23 +32,24 @@ then
     arch="i686"
 fi
 
-if [ "$arch" = "i686" ]
-then
-    maria_arch_path=x86
-else
-    maria_arch_path=amd64
-fi
+function ssl_version()
+{
+    sslv=$(ls -la {/,/usr/}{lib64,lib,lib/x86_64-linux-gnu}/libssl.so.1.* 2>/dev/null | sed 's/.*[.]so//; s/[^0-9]//g' | head -1)
 
-case "$1" in
-    innodb51)
-        url="http://s3.amazonaws.com/percona.com/downloads/community"
-        tarball="mysql-5.1.73-linux-$arch-glibc23.tar.gz"
+    case $sslv in
+        100|101|102)
         ;;
+        *)
+            if ! test -r "$1"
+            then
+                >&2 echo "tarball for your openssl version ($sslv) is not available"
+                exit 1
+            fi
+            ;;
+    esac
 
-    innodb55)
-        url="http://s3.amazonaws.com/percona.com/downloads/community"
-        tarball="mysql-5.5.42-linux2.6-$arch.tar.gz"
-        ;;
+    echo $sslv
+}
 
 case "$1" in
     innodb80)
