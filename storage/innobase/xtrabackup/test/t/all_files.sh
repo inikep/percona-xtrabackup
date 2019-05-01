@@ -14,13 +14,14 @@ function compare_files() {
 dir1=$1
 dir2=$2
 
+ign_list="(innodb_temp|xtrabackup_binlog_pos_innodb|*.dblwr)"
+
 # files that present in the backup directory, but not present in the datadir
-diff -u <( ( ( cd $dir1; find . | grep -v innodb_temp )
-             ( cd $dir2; find . | grep -v innodb_temp )
-             ( cd $dir2; find . | grep -v innodb_temp ) ) | sort | uniq -u ) - <<EOF
+diff -u <( ( ( cd $dir1; find . | grep -Ev $ign_list )
+             ( cd $dir2; find . | grep -Ev $ign_list )
+             ( cd $dir2; find . | grep -Ev $ign_list ) ) | sort | uniq -u ) - <<EOF
 ./backup-my.cnf
 ./xtrabackup_binlog_info
-./xtrabackup_binlog_pos_innodb
 ./xtrabackup_checkpoints
 ./xtrabackup_info
 ./xtrabackup_logfile
@@ -28,10 +29,16 @@ diff -u <( ( ( cd $dir1; find . | grep -v innodb_temp )
 ./xtrabackup_tablespaces
 EOF
 
+if is_xtradb ; then
+    XTRA_DOUBLEWRITE="./xb_doublewrite"
+else
+    XTRA_DOUBLEWRITE=""
+fi
+
 # files that present in the datadir, but not present in the backup
-diff -u <( ( ( cd $dir1; find . | grep -v innodb_temp )
-             ( cd $dir1; find . | grep -v innodb_temp )
-             ( cd $dir2; find . | grep -v innodb_temp ) ) | sort | uniq -u ) - <<EOF
+diff -B -u <( ( ( cd $dir1; find . | grep -Ev $ign_list )
+                ( cd $dir1; find . | grep -Ev $ign_list )
+                ( cd $dir2; find . | grep -Ev $ign_list ) ) | sort | uniq -u ) - <<EOF
 ./auto.cnf
 ./ca-key.pem
 ./ca.pem
@@ -44,6 +51,7 @@ diff -u <( ( ( cd $dir1; find . | grep -v innodb_temp )
 ./public_key.pem
 ./server-cert.pem
 ./server-key.pem
+${XTRA_DOUBLEWRITE}
 EOF
 
 }
@@ -54,12 +62,11 @@ dir1=$1
 dir2=$2
 
 # files that present in the backup directory, but not present in the datadir
-diff -u <( ( ( cd $dir1; find . | grep -v innodb_temp )
-             ( cd $dir2; find . | grep -v innodb_temp )
-             ( cd $dir2; find . | grep -v innodb_temp ) ) | sort | uniq -u ) - <<EOF
+diff -u <( ( ( cd $dir1; find . | grep -Ev $ign_list )
+             ( cd $dir2; find . | grep -Ev $ign_list )
+             ( cd $dir2; find . | grep -Ev $ign_list ) ) | sort | uniq -u ) - <<EOF
 ./backup-my.cnf
 ./xtrabackup_binlog_info
-./xtrabackup_binlog_pos_innodb
 ./xtrabackup_checkpoints
 ./xtrabackup_info
 ./xtrabackup_logfile
@@ -68,9 +75,9 @@ diff -u <( ( ( cd $dir1; find . | grep -v innodb_temp )
 EOF
 
 # files that present in the datadir, but not present in the backup
-diff -u <( ( ( cd $dir1; find . | grep -v innodb_temp )
-             ( cd $dir1; find . | grep -v innodb_temp )
-             ( cd $dir2; find . | grep -v innodb_temp ) ) | sort | uniq -u ) - <<EOF
+diff -B -u <( ( ( cd $dir1; find . | grep -Ev $ign_list )
+                ( cd $dir1; find . | grep -Ev $ign_list )
+                ( cd $dir2; find . | grep -Ev "innodb_temp|*.dblwr" ) ) | sort | uniq -u ) - <<EOF
 ./auto.cnf
 ./ca-key.pem
 ./ca.pem
@@ -84,6 +91,7 @@ diff -u <( ( ( cd $dir1; find . | grep -v innodb_temp )
 ./public_key.pem
 ./server-cert.pem
 ./server-key.pem
+${XTRA_DOUBLEWRITE}
 EOF
 
 }

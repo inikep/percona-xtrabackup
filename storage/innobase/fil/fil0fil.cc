@@ -641,9 +641,10 @@ class Tablespace_dirs {
   /** Open IBD tablespaces.
   @param[in]  start   Start of slice
   @param[in]  end   End of slice
-  @param[in]  thread_id Thread ID */
+  @param[in]  thread_id Thread ID
+  @param[out] result false in case of failure */
   void open_ibd(const Const_iter &start, const Const_iter &end,
-                size_t thread_id);
+                size_t thread_id, bool &result);
 
  private:
   /** Directories scanned and the files discovered under them. */
@@ -3759,6 +3760,7 @@ dberr_t Fil_shard::iterate_spaces(bool include_log,
 
   return (DB_SUCCESS);
 }
+
 
 /** Iterate through all persistent tablespace files (FIL_TYPE_TABLESPACE)
 returning the nodes via callback function cbk.
@@ -11110,7 +11112,9 @@ dberr_t fil_open_for_xtrabackup(const std::string &path,
 @param[in]  end   End of slice
 @param[in]  thread_id Thread ID */
 void Tablespace_dirs::open_ibd(const Const_iter &start, const Const_iter &end,
-                               size_t thread_id) {
+                               size_t thread_id, bool &result) {
+  if (!result) return;
+
   for (auto it = start; it != end; ++it) {
     const std::string filename = it->second;
     const auto &files = m_dirs[it->first];
@@ -11120,8 +11124,11 @@ void Tablespace_dirs::open_ibd(const Const_iter &start, const Const_iter &end,
       continue;
     }
 
-    fil_open_for_xtrabackup(phy_filename,
-                            filename.substr(0, filename.length() - 4));
+    dberr_t err = fil_open_for_xtrabackup(
+        phy_filename, filename.substr(0, filename.length() - 4));
+    if (err != DB_SUCCESS) {
+      result = false;
+    }
   }
 }
 
@@ -11516,10 +11523,13 @@ dberr_t Tablespace_dirs::scan(bool populate_fil_cache) {
   }
 
   if (err == DB_SUCCESS && populate_fil_cache) {
+    bool result = true;
     std::function<void(const Const_iter &, const Const_iter &, size_t)> open =
-        std::bind(&Tablespace_dirs::open_ibd, this, _1, _2, _3);
+        std::bind(&Tablespace_dirs::open_ibd, this, _1, _2, _3, result);
 
     par_for(PFS_NOT_INSTRUMENTED, ibd_files, n_threads, open);
+
+    if (!result) err = DB_FAIL;
   }
 
   return (err);
