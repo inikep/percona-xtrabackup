@@ -24,6 +24,7 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA
 #include <my_sys.h>
 #include <my_alloc.h>
 #include <mysql/service_mysql_alloc.h>
+#include <signal.h>
 #include <typelib.h>
 #include <cstdlib>
 #include <fstream>
@@ -820,6 +821,7 @@ bool xbcloud_download(Object_store *store, const std::string &container,
     if (error && !download_state.empty()) {
       continue;
     }
+    if (error) break;
     for (auto it = chunks.begin(); it != chunks.end();) {
       if (error) break;
       if (!download_state.start_chunk(it->first)) {
@@ -889,6 +891,9 @@ struct main_exit_hook {
 int main(int argc, char **argv) {
   MY_INIT(argv[0]);
 
+#ifndef NO_SIGPIPE
+  signal(SIGPIPE, SIG_IGN);
+#endif
   xb_libgcrypt_init();
 
   http_init();
