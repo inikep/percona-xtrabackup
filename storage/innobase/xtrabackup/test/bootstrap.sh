@@ -57,9 +57,9 @@ case "$1" in
         tarball="mysql-8.0.18-linux-glibc2.12-${arch}.tar.xz"
         ;;
 
-    mariadb100)
-        url="http://s3.amazonaws.com/percona.com/downloads/community"
-        tarball="mariadb-10.0.14-linux-$arch.tar.gz"
+    xtradb80)
+        url="https://www.percona.com/downloads/Percona-Server-8.0/Percona-Server-8.0.15-6/binary/tarball"
+        tarball="Percona-Server-8.0.15-6-Linux.${arch}.ssl$(ssl_version).tar.gz"
         ;;
 
     *)
