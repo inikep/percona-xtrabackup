@@ -1887,6 +1887,8 @@ dberr_t srv_start(bool create_new_db IF_XB(, lsn_t to_lsn)) {
 
   switch (err) {
     case DB_SUCCESS:
+      err = srv_sys_enable_encryption();
+      if (err != DB_SUCCESS) return (srv_init_abort(err));
       break;
     case DB_CANNOT_OPEN_FILE:
       ib::error(ER_IB_MSG_1134);
