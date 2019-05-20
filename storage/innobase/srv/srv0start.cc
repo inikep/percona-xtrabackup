@@ -1521,6 +1521,28 @@ static dberr_t srv_init_abort_low(bool create_new_db,
   return (err);
 }
 
+/** At startup load the encryption information from first datafile
+to tablespace object
+@return DB_SUCCESS on succes, others on failure */
+static dberr_t srv_sys_enable_encryption() {
+  fil_space_t *space = fil_space_get(TRX_SYS_SPACE);
+  const ulint fsp_flags = srv_sys_space.m_files.begin()->flags();
+  const bool is_encrypted = FSP_FLAGS_GET_ENCRYPTION(fsp_flags);
+  dberr_t err = DB_SUCCESS;
+
+  if (is_encrypted && !use_dumped_tablespace_keys) {
+    fsp_flags_set_encryption(space->flags);
+    srv_sys_space.set_flags(space->flags);
+
+    err = fil_set_encryption(space->id, Encryption::AES,
+                             srv_sys_space.m_files.begin()->m_encryption_key,
+                             srv_sys_space.m_files.begin()->m_encryption_iv);
+    ut_ad(err == DB_SUCCESS);
+  }
+
+  return (err);
+}
+
 dberr_t srv_start(bool create_new_db, lsn_t to_lsn) {
   lsn_t flushed_lsn;
 
@@ -1865,6 +1887,8 @@ dberr_t srv_start(bool create_new_db, lsn_t to_lsn) {
 
   switch (err) {
     case DB_SUCCESS:
+      err = srv_sys_enable_encryption();
+      if (err != DB_SUCCESS) return (srv_init_abort(err));
       break;
     case DB_CANNOT_OPEN_FILE:
       ib::error(ER_IB_MSG_1134);
