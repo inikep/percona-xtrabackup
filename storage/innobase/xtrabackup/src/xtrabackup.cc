@@ -2126,10 +2126,8 @@ dberr_t dict_load_tables_from_space_id(space_id_t space_id, THD *thd,
                        &uncompressed_sdi_len, trx);
       if (err == DB_OUT_OF_MEMORY) {
         compressed_buf_len = compressed_sdi_len;
-        uncompressed_buf_len = uncompressed_sdi_len;
         compressed_sdi =
             static_cast<byte *>(ut_realloc(compressed_sdi, compressed_buf_len));
-        sdi = static_cast<byte *>(ut_realloc(sdi, uncompressed_buf_len));
         continue;
       }
       break;
@@ -2139,14 +2137,15 @@ dberr_t dict_load_tables_from_space_id(space_id_t space_id, THD *thd,
       goto error;
     }
 
-    compressed_sdi[compressed_sdi_len] = 0;
+    if (uncompressed_buf_len < uncompressed_sdi_len) {
+      uncompressed_buf_len = uncompressed_sdi_len;
+      sdi = static_cast<byte *>(ut_realloc(sdi, uncompressed_buf_len));
+    }
 
     Sdi_Decompressor decompressor(static_cast<byte *>(sdi),
                                   uncompressed_sdi_len, compressed_sdi,
                                   compressed_sdi_len);
     decompressor.decompress();
-
-    sdi[uncompressed_sdi_len] = 0;
 
     if (ib_key.sdi_key->type != 1 /* dd::Sdi_type::TABLE */) {
       continue;
@@ -2157,8 +2156,9 @@ dberr_t dict_load_tables_from_space_id(space_id_t space_id, THD *thd,
     Table_Ptr dd_table{dd::create_object<dd::Table>()};
     dd::String_type schema_name;
 
-    bool res = dd::deserialize(thd, dd::Sdi_type((const char *)sdi),
-                               dd_table.get(), &schema_name);
+    bool res = dd::deserialize(
+        thd, dd::Sdi_type((const char *)sdi, uncompressed_sdi_len),
+        dd_table.get(), &schema_name);
 
     if (res) {
       err = DB_ERROR;
