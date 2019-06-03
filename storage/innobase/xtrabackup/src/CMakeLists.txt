@@ -81,8 +81,8 @@ MYSQL_ADD_EXECUTABLE(xtrabackup
   datasink.cc
   ds_buffer.cc
   ds_compress.cc
+  ds_compress_lz4.cc
   ds_encrypt.cc
-  ds_decrypt.cc
   ds_local.cc
   ds_stdout.cc
   ds_tmpfile.cc
@@ -122,6 +122,11 @@ TARGET_LINK_LIBRARIES(xtrabackup
   crc
   )
 
+ # We depend on protobuf because of the mysqlx plugin and replication.
+ IF(UNIX_INSTALL_RPATH_ORIGIN_PRIV_LIBDIR)
+   ADD_INSTALL_RPATH_FOR_PROTOBUF(xtrabackup)
+ ENDIF()
+
 IF(WITH_VERSION_CHECK)
 ADD_CUSTOM_COMMAND(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/version_check_pl.h
                    COMMAND ${XXD_PATH} --include version_check.pl
@@ -143,6 +148,7 @@ MYSQL_ADD_EXECUTABLE(xbstream
   ds_stdout.cc
   ds_decompress.cc
   ds_decrypt.cc
+  ds_decompress_lz4.cc
   datasink.cc
   quicklz/quicklz.c
   xbstream.cc
@@ -150,7 +156,19 @@ MYSQL_ADD_EXECUTABLE(xbstream
   xbstream_write.cc
   xbcrypt_common.cc
   xbcrypt_write.cc
+  ${BUNDLED_LZ4_PATH}/xxhash.c
   )
+
+MY_ADD_COMPILE_DEFINITIONS(
+  ${BUNDLED_LZ4_PATH}/xxhash.c
+  COMPILE_DEFINITIONS XXH_NAMESPACE=MY_
+  )
+ADD_COMPILE_FLAGS(
+    ${BUNDLED_LZ4_PATH}/xxhash.c
+    ds_decompress_lz4.cc
+    ds_compress_lz4.cc
+    COMPILE_FLAGS -I${CMAKE_SOURCE_DIR}/extra/lz4 -I${BUNDLED_LZ4_PATH}
+)
 
 SET_TARGET_PROPERTIES(xbstream
         PROPERTIES LINKER_LANGUAGE CXX
