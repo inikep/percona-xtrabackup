@@ -139,7 +139,7 @@ bool is_key_cache_variable_suffix(std::string_view suffix) {
 */
 int handle_options(int *argc, char ***argv, const struct my_option *longopts,
                    my_get_one_option get_one_option) {
-  return my_handle_options(argc, argv, longopts, get_one_option, nullptr,
+  return my_handle_options(argc, argv, longopts, get_one_option, nullptr, false,
                            false);
 }
 
@@ -236,12 +236,15 @@ double getopt_ulonglong2double(ulonglong v) {
                                     be read even when unknown options are
                                     encountered.
 
+  @param [in] validate_only When set to true, options values are not assinged.
+
   @return error in case of ambiguous or unknown options,
           0 on success.
 */
 int my_handle_options(int *argc, char ***argv, const struct my_option *longopts,
                       my_get_one_option get_one_option,
-                      const char **command_list, bool ignore_unknown_option) {
+                      const char **command_list, bool ignore_unknown_option,
+                      bool validate_only) {
   uint argvpos = 0, length;
   bool end_of_options = false, must_be_var, set_maximum_value, option_is_loose;
   char **pos, **pos_end, *optend, *opt_str, key_name[FN_REFLEN];
@@ -256,7 +259,7 @@ int my_handle_options(int *argc, char ***argv, const struct my_option *longopts,
   assert(argv && *argv);
   (*argc)--; /* Skip the program name */
   (*argv)++; /*      --- || ----      */
-  init_variables(longopts, init_one_value);
+  if (!validate_only) init_variables(longopts, init_one_value);
 
   /*
     Search for args_separator, if found, then the first part of the
@@ -486,9 +489,9 @@ int my_handle_options(int *argc, char ***argv, const struct my_option *longopts,
               *optend was set to '0' if one used --disable-option
             */
             (*argc)--;
-            if (!optend)
-              *((bool *)value) = true;
-            else {
+            if (!optend) {
+              if (!validate_only) *((bool *)value) = true;
+            } else {
               bool ret = false;
               bool error = false;
               ret = get_bool_argument(optend, &error);
@@ -497,8 +500,9 @@ int my_handle_options(int *argc, char ***argv, const struct my_option *longopts,
                                          EE_OPTION_IGNORED_DUE_TO_INVALID_VALUE,
                                          my_progname, optp->name, optend);
                 continue;
-              } else
+              } else if (!validate_only) {
                 *((bool *)value) = ret;
+              }
             }
             if (get_one_option &&
                 get_one_option(
@@ -506,7 +510,7 @@ int my_handle_options(int *argc, char ***argv, const struct my_option *longopts,
                     *((bool *)value) ? enabled_my_option : disabled_my_option))
               return EXIT_ARGUMENT_INVALID;
             /* set variables source */
-            setval_source(optp, (void *)optp->arg_source);
+            if (!validate_only) setval_source(optp, (void *)optp->arg_source);
             continue;
           }
           argument = optend;
@@ -545,7 +549,7 @@ int my_handle_options(int *argc, char ***argv, const struct my_option *longopts,
               }
               if ((optp->var_type & GET_TYPE_MASK) == GET_BOOL &&
                   optp->arg_type == NO_ARG) {
-                *((bool *)optp->value) = true;
+                if (!validate_only) *((bool *)optp->value) = true;
                 if (get_one_option && get_one_option(optp->id, optp, argument))
                   return EXIT_UNSPECIFIED_ERROR;
                 continue;
@@ -560,7 +564,7 @@ int my_handle_options(int *argc, char ***argv, const struct my_option *longopts,
                     print_cmdline_password_warning();
                 } else {
                   if (optp->arg_type == OPT_ARG) {
-                    if (optp->var_type == GET_BOOL)
+                    if (optp->var_type == GET_BOOL && !validate_only)
                       *((bool *)optp->value) = true;
                     if (get_one_option &&
                         get_one_option(optp->id, optp, argument))
@@ -581,8 +585,8 @@ int my_handle_options(int *argc, char ***argv, const struct my_option *longopts,
                 }
               }
               int error;
-              if ((error =
-                       setval(optp, optp->value, argument, set_maximum_value)))
+              if (!validate_only && (error = setval(optp, optp->value, argument,
+                                                    set_maximum_value)))
                 return error;
               if (get_one_option && get_one_option(optp->id, optp, argument))
                 return EXIT_UNSPECIFIED_ERROR;
@@ -623,7 +627,8 @@ int my_handle_options(int *argc, char ***argv, const struct my_option *longopts,
         continue;
       }
       int error;
-      if ((error = setval(optp, value, argument, set_maximum_value)))
+      if (!validate_only &&
+          (error = setval(optp, value, argument, set_maximum_value)))
         return error;
       if (get_one_option && get_one_option(optp->id, optp, argument))
         return EXIT_UNSPECIFIED_ERROR;
