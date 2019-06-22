@@ -46,6 +46,8 @@ struct xb_fil_cur_t {
                                otherwise */
   bool is_ibd;                 /*!< true for IBD tablespace tablespace,
                                false otherwise */
+  bool is_compressable;        /*!< true for uncompressed and unencrypted
+                               tablespaces */
   xb_read_filt_t *read_filter; /*!< read filter */
   xb_read_filt_ctxt_t read_filter_ctxt;
   /*!< read filter context */
