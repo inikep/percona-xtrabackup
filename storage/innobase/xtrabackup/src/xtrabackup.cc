@@ -1186,7 +1186,8 @@ struct my_option xb_client_options[] = {
      "Set datafile read buffer size, given value is scaled up to page size."
      " Default is 10Mb.",
      &opt_read_buffer_size, &opt_read_buffer_size, 0, GET_UINT, OPT_ARG,
-     10 * 1024 * 1024, UNIV_PAGE_SIZE_MAX, UINT_MAX, 0, UNIV_PAGE_SIZE_MAX, 0},
+     10 * 1024 * 1024, 2 * UNIV_PAGE_SIZE_MAX, UINT_MAX, 0, UNIV_PAGE_SIZE_MAX,
+     0},
 
 #include "caching_sha2_passwordopt-longopts.h"
 
@@ -2858,7 +2859,12 @@ static bool xtrabackup_copy_datafile(fil_node_t *node, uint thread_n) {
     goto error;
   }
 
-  dstfile = ds_open(ds_data, dst_name, &cursor.statinfo);
+  /* do not compress already compressed tablespaces */
+  if (cursor.is_compressable) {
+    dstfile = ds_open(ds_data, dst_name, &cursor.statinfo);
+  } else {
+    dstfile = ds_open(ds_uncompressed_data, dst_name, &cursor.statinfo);
+  }
   if (dstfile == NULL) {
     msg("[%02u] xtrabackup: error: cannot open the destination stream for %s\n",
         thread_n, dst_name);
@@ -5103,13 +5109,14 @@ static bool xtrabackup_apply_delta(
   byte *incremental_buffer;
 
   size_t offset;
+  os_file_stat_t stat_info;
 
   if (entry.is_empty_dir) {
     return true;
   }
 
   IORequest read_request(IORequest::READ);
-  IORequest write_request(IORequest::WRITE);
+  IORequest write_request(IORequest::WRITE | IORequest::PUNCH_HOLE);
 
   ut_a(xtrabackup_incremental);
 
@@ -5177,6 +5184,8 @@ static bool xtrabackup_apply_delta(
 
   os_file_set_nocache(dst_file.m_file, dst_path, "OPEN");
 
+  os_file_get_status(dst_path, &stat_info, false, false);
+
   /* allocate buffer for incremental backup */
   incremental_buffer_base = static_cast<byte *>(
       ut::malloc_withkey(UT_NEW_THIS_FILE_PSI_KEY,
@@ -5206,9 +5215,7 @@ static bool xtrabackup_apply_delta(
         last_buffer = true;
         break;
       default:
-        msg("xtrabackup: error: %s seems not "
-            ".delta file.\n",
-            src_path);
+        msg("xtrabackup: error: %s is not valid .delta file.\n", src_path);
         goto error;
     }
 
@@ -5231,18 +5238,34 @@ static bool xtrabackup_apply_delta(
                   POSIX_FADV_DONTNEED);
 
     for (page_in_buffer = 1; page_in_buffer < page_size / 4; page_in_buffer++) {
-      ulint offset_on_page;
-
-      offset_on_page =
+      const page_t *page = incremental_buffer + page_in_buffer * page_size;
+      const ulint offset_on_page =
           mach_read_from_4(incremental_buffer + page_in_buffer * 4);
 
       if (offset_on_page == 0xFFFFFFFFUL) break;
 
-      success = os_file_write(write_request, dst_path, dst_file,
-                              incremental_buffer + page_in_buffer * page_size,
-                              (offset_on_page << page_size_shift), page_size);
+      const auto offset_in_file = offset_on_page << page_size_shift;
+
+      success = os_file_write(write_request, dst_path, dst_file, page,
+                              offset_in_file, page_size);
       if (!success) {
         goto error;
+      }
+
+      if (IORequest::is_punch_hole_supported() &&
+          (Compression::is_compressed_page(page) ||
+           fil_page_get_type(page) == FIL_PAGE_COMPRESSED_AND_ENCRYPTED)) {
+        size_t compressed_len =
+            mach_read_from_2(page + FIL_PAGE_COMPRESS_SIZE_V1) + FIL_PAGE_DATA;
+        compressed_len = ut_calc_align(compressed_len, stat_info.block_size);
+        if (compressed_len < page_size) {
+          if (os_file_punch_hole(dst_file.m_file,
+                                 offset_in_file + compressed_len,
+                                 page_size - compressed_len) != DB_SUCCESS) {
+            msg("xtrabackup: os_file_punch_hole returned error\n");
+            goto error;
+          }
+        }
       }
     }
 
@@ -5258,8 +5281,8 @@ error:
   if (incremental_buffer_base) ut::free(incremental_buffer_base);
   if (src_file != XB_FILE_UNDEFINED) os_file_close(src_file);
   if (dst_file != XB_FILE_UNDEFINED) os_file_close(dst_file);
-  msg("xtrabackup: Error: xtrabackup_apply_delta(): "
-      "failed to apply %s to %s.\n",
+  msg("xtrabackup: Error: xtrabackup_apply_delta(): failed to apply %s to "
+      "%s.\n",
       src_path, dst_path);
   return false;
 }
