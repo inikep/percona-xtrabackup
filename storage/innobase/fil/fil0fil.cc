@@ -3118,6 +3118,7 @@ bool Fil_shard::mutex_acquire_and_get_space(space_id_t space_id,
 
   auto begin_time = ut_time_monotonic();
   auto start_time = begin_time;
+  auto last_wake_time = begin_time;
 
   for (size_t i = 0; i < 3; ++i) {
     /* Flush tablespaces so that we can close modified
@@ -3146,6 +3147,23 @@ bool Fil_shard::mutex_acquire_and_get_space(space_id_t space_id,
         fil_system->close_file_in_all_LRU(
             fil_system->should_print_close_by_lru_info());
         break;
+      }
+      if (ut_difftime(ut_time(), last_wake_time) > 1.0) {
+        /* We've spent more than a second trying to close some of the open files
+        without any luck. We can hang in this loop forewer, because:
+        - files cannot be closed, they have pending IO requests
+        - aio handler threads are waiting in os_aio_simulated_handler */
+
+        /* in order to break the loop, lets wake aio handler threads */
+        os_aio_simulated_wake_handler_threads();
+
+        std::this_thread::yield();
+
+        /* and flush the changes so that files with no pending IOs can be
+        closed */
+        fil_system->flush_file_spaces(type);
+
+        last_wake_time = ut_time();
       }
     }
 
@@ -8223,17 +8241,17 @@ dberr_t Fil_shard::do_io(const IORequest &type, bool sync,
       return DB_ERROR;
     }
 
-    /* Extend the file if the page_no does not fall inside its bounds;
-       because xtrabackup may have copied it when it was smaller */
-      mutex_release();
+    /* Extend the file if the page_no does not fall inside its bounds
+    because xtrabackup may have copied it when it was smaller */
+    mutex_release();
 
-      bool success = space_extend(space, page_no + 1);
+    bool success = space_extend(space, page_no + 1);
 
-      if (!success) {
-        return (DB_ERROR);
-      }
-    } else {
-      mutex_release();
+    if (!success) {
+      return (DB_ERROR);
+    }
+  } else {
+    mutex_release();
   }
 
   DEBUG_SYNC_C("innodb_fil_do_io_prepared_io_with_no_mutex");
