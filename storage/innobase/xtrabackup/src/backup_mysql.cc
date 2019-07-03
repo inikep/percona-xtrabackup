@@ -926,6 +926,8 @@ static bool wait_for_no_updates(MYSQL *connection, uint timeout,
                                 uint threshold) {
   time_t start_time;
 
+  my_thread_init();
+
   start_time = time(NULL);
 
   msg_ts(
@@ -979,6 +981,8 @@ static void kill_query_thread() {
 
 stop_thread:
   msg_ts("Kill query thread stopped\n");
+
+  my_thread_end();
 
   os_event_set(kill_query_thread_stopped);
 }
