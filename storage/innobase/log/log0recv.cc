@@ -1771,9 +1771,9 @@ static byte *recv_parse_or_apply_log_rec_body(
             !fsp_is_system_or_temp_tablespace(space_id) &&
             /* For cloned db header page has the encryption information. */
             !recv_sys->is_cloned_db) {
-          ut_ad(LSN_MAX != start_lsn);
-          return (fil_tablespace_redo_encryption(ptr, end_ptr, space_id,
-                                                 start_lsn));
+          if (fil_tablespace_redo_encryption(ptr, end_ptr, space_id,
+                                             start_lsn) == nullptr)
+            return (nullptr);
         }
 #ifdef UNIV_HOTBACKUP
       }
