@@ -1262,6 +1262,7 @@ static void par_copy_rocksdb_files(const Myrocks_datadir::const_iterator &start,
                                    bool *result) {
   for (auto it = start; it != end; it++) {
     if (ends_with(it->path.c_str(), ".qp") ||
+        ends_with(it->path.c_str(), ".lz4") ||
         ends_with(it->path.c_str(), ".xbcrypt")) {
       continue;
     }
@@ -1835,6 +1836,7 @@ bool should_skip_file_on_copy_back(const char *filepath) {
                             "xtrabackup_checkpoints",
                             "xtrabackup_tablespaces",
                             ".qp",
+                            ".lz4",
                             ".pmap",
                             ".tmp",
                             ".xbcrypt",
