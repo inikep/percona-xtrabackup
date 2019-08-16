@@ -6433,7 +6433,7 @@ fil_load_status Fil_shard::ibd_open_for_recovery(space_id_t space_id,
     }
   }
 
-  /* Set encryption operation in progress */
+  /* Set unencryption in progress flag */
   space->encryption_op_in_progress = df.m_encryption_op_in_progress;
   space->m_header_page_flush_lsn = df.get_flush_lsn();
 
@@ -10967,8 +10967,6 @@ byte *fil_tablespace_redo_encryption(byte *ptr, const byte *end,
       might be needed. It will be reset when this REDO record is applied. */
       return (ptr);
     }
-    bool found = xb_fetch_tablespace_key(space_id, key, iv);
-    ut_a(found);
   }
 
   byte iv[Encryption::KEY_LEN] = {0};
