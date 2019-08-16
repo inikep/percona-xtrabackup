@@ -6420,7 +6420,7 @@ fil_load_status Fil_shard::ibd_open_for_recovery(space_id_t space_id,
     }
   }
 
-  /* Set encryption operation in progress */
+  /* Set unencryption in progress flag */
   space->encryption_op_in_progress = df.m_encryption_op_in_progress;
   space->m_header_page_flush_lsn = df.get_flush_lsn();
 

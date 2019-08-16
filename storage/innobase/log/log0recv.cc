@@ -336,7 +336,7 @@ void recv_sys_create() {
 }
 
 /** Resize the recovery parsing buffer up to log_buffer_size */
-static bool recv_sys_resize_buf() {
+bool recv_sys_resize_buf() {
   ut_ad(recv_sys->buf_len <= srv_log_buffer_size);
 
 #ifndef UNIV_HOTBACKUP
@@ -912,18 +912,6 @@ dberr_t recv_verify_log_is_clean_pre_8_0_30(log_t &log) {
   return DB_SUCCESS;
 }
 
-/** Describes location of a single checkpoint. */
-struct Log_checkpoint_location {
-  /** File containing checkpoint header and checkpoint lsn. */
-  Log_file_id m_checkpoint_file_id{0};
-
-  /** Checkpoint header number. */
-  Log_checkpoint_header_no m_checkpoint_header_no{};
-
-  /** Checkpoint LSN. */
-  lsn_t m_checkpoint_lsn{0};
-};
-
 /** Find the latest checkpoint in the given log file.
 @param[in]      file_handle     handle for the opened redo log file
 @param[out]     checkpoint      the latest checkpoint found (if any)
@@ -968,8 +956,11 @@ struct Log_checkpoint_location {
 @param[in,out]  log             redo log
 @param[out]     checkpoint      the latest checkpoint found (if any)
 @return true iff any checkpoint has been found */
-static bool recv_find_max_checkpoint(log_t &log,
-                                     Log_checkpoint_location &checkpoint) {
+#ifndef XTRABACKUP
+static
+#endif /*XTRABACKUP */
+    bool
+    recv_find_max_checkpoint(log_t &log, Log_checkpoint_location &checkpoint) {
   bool found = false;
   checkpoint = {};
 
@@ -1639,6 +1630,7 @@ static byte *recv_parse_or_apply_log_rec_body(
             !fsp_is_system_or_temp_tablespace(space_id) &&
             /* For cloned db header page has the encryption information. */
             !recv_sys->is_cloned_db) {
+          ut_ad(LSN_MAX != start_lsn);
           if (fil_tablespace_redo_encryption(ptr, end_ptr, space_id,
                                              start_lsn) == nullptr)
             return (nullptr);

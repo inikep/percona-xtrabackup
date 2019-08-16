@@ -690,11 +690,22 @@ block.
 @return whether the checksum matches */
 bool log_block_checksum_is_ok(const byte *block);
 
-/** Find the latest checkpoint in the log header.
-@param[in,out]  log   redo log
-@param[out] max_field LOG_CHECKPOINT_1 or LOG_CHECKPOINT_2
-@return error code or DB_SUCCESS */
-[[nodiscard]] dberr_t recv_find_max_checkpoint(log_t &log, ulint *max_field);
+/** Describes location of a single checkpoint. */
+struct Log_checkpoint_location {
+  /** File containing checkpoint header and checkpoint lsn. */
+  Log_file_id m_checkpoint_file_id{0};
+
+  /** Checkpoint header number. */
+  Log_checkpoint_header_no m_checkpoint_header_no{};
+
+  /** Checkpoint LSN. */
+  lsn_t m_checkpoint_lsn{0};
+};
+/** Find the latest checkpoint (check all existing redo log files).
+@param[in,out]  log             redo log
+@param[out]     checkpoint      the latest checkpoint found (if any)
+@return true iff any checkpoint has been found */
+bool recv_find_max_checkpoint(log_t &log, Log_checkpoint_location &checkpoint);
 
 /** Reads a specified log segment to a buffer.
 @param[in,out]  log   redo log
@@ -716,6 +727,9 @@ bool recv_sys_add_to_parsing_buf(const byte *log_block, lsn_t scanned_lsn,
 
 /** Moves the parsing buffer data left to the buffer start. */
 void recv_reset_buffer();
+
+/** Resize the recovery parsing buffer upto log_buffer_size */
+bool recv_sys_resize_buf();
 
 /** Parse log records from a buffer and optionally store them to a
 hash table to wait merging to file pages. */

@@ -67,18 +67,6 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 #include "backup_mysql.h"
 
-extern uint opt_ssl_mode;
-extern char *opt_ssl_ca;
-extern char *opt_ssl_capath;
-extern char *opt_ssl_cert;
-extern char *opt_ssl_cipher;
-extern char *opt_ssl_key;
-extern char *opt_ssl_crl;
-extern char *opt_ssl_crlpath;
-extern char *opt_tls_version;
-extern ulong opt_ssl_fips_mode;
-extern bool ssl_mode_set_explicitly;
-
 /** Possible values for system variable "innodb_checksum_algorithm". */
 extern const char *innodb_checksum_algorithm_names[];
 
@@ -228,7 +216,9 @@ MYSQL_RES *xb_mysql_query(MYSQL *connection, const char *query, bool use_result,
     if ((mysql_result = mysql_store_result(connection)) == NULL) {
       msg("Error: failed to fetch query result %s: %s\n", query,
           mysql_error(connection));
-      exit(EXIT_FAILURE);
+      if (die_on_error) {
+        exit(EXIT_FAILURE);
+      }
     }
 
     if (!use_result) {
@@ -249,11 +239,6 @@ my_ulonglong xb_mysql_numrows(MYSQL *connection, const char *query,
   }
   return rows_count;
 }
-
-struct mysql_variable {
-  const char *name;
-  char **value;
-};
 
 /*********************************************************************/ /**
  Read mysql_variable from MYSQL_RES, return number of rows consumed. */
@@ -298,14 +283,14 @@ static int read_mysql_variables_from_result(MYSQL_RES *mysql_result,
   return rows_read;
 }
 
-static void read_mysql_variables(MYSQL *connection, const char *query,
-                                 mysql_variable *vars, bool vertical_result) {
+void read_mysql_variables(MYSQL *connection, const char *query,
+                          mysql_variable *vars, bool vertical_result) {
   MYSQL_RES *mysql_result = xb_mysql_query(connection, query, true);
   read_mysql_variables_from_result(mysql_result, vars, vertical_result);
   mysql_free_result(mysql_result);
 }
 
-static void free_mysql_variables(mysql_variable *vars) {
+void free_mysql_variables(mysql_variable *vars) {
   mysql_variable *var;
 
   for (var = vars; var->name; var++) {
