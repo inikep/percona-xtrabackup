@@ -2478,6 +2478,7 @@ static bool xb_read_delta_metadata(const char *filepath,
   info->page_size = ULINT_UNDEFINED;
   info->zip_size = ULINT_UNDEFINED;
   info->space_id = SPACE_UNKNOWN;
+  info->space_flags = 0;
 
   fp = fopen(filepath, "r");
   if (!fp) {
@@ -2493,6 +2494,8 @@ static bool xb_read_delta_metadata(const char *filepath,
         info->zip_size = strtoul(value, NULL, 10);
       } else if (strcmp(key, "space_id") == 0) {
         info->space_id = strtoul(value, NULL, 10);
+      } else if (strcmp(key, "space_flags") == 0) {
+        info->space_flags = strtoul(value, NULL, 10);
       }
     }
   }
@@ -2518,7 +2521,7 @@ Write meta info for an incremental delta.
 bool xb_write_delta_metadata(const char *filename,
                              const xb_delta_info_t *info) {
   ds_file_t *f;
-  char buf[64];
+  char buf[200];
   bool ret;
   size_t len;
   MY_STAT mystat;
@@ -2526,8 +2529,9 @@ bool xb_write_delta_metadata(const char *filename,
   snprintf(buf, sizeof(buf),
            "page_size = %lu\n"
            "zip_size = %lu\n"
-           "space_id = %lu\n",
-           info->page_size, info->zip_size, info->space_id);
+           "space_id = %lu\n"
+           "space_flags = %lu\n",
+           info->page_size, info->zip_size, info->space_id, info->space_flags);
   len = strlen(buf);
 
   mystat.st_size = len;
@@ -4998,7 +5002,6 @@ static pfs_os_file_t xb_delta_open_matching_space(
   char dest_space_name[FN_REFLEN * 2 + 1];
   bool ok;
   pfs_os_file_t file = XB_FILE_UNDEFINED;
-  ulint tablespace_flags;
   xb_filter_entry_t *table;
   fil_space_t *fil_space;
   space_id_t f_space_id;
@@ -5187,20 +5190,20 @@ static pfs_os_file_t xb_delta_open_matching_space(
 
   /* No matching space found. create the new one.  */
 
-  if (!fil_space_create(dest_space_name, space_id, 0, FIL_TYPE_TABLESPACE)) {
+  fil_space = fil_space_create(dest_space_name, space_id, space_flags,
+                               FIL_TYPE_TABLESPACE);
+  if (fil_space == nullptr) {
     msg("xtrabackup: Cannot create tablespace %s\n", dest_space_name);
     goto exit;
   }
 
   /* Calculate correct tablespace flags for compressed tablespaces.  */
-  if (!zip_size || zip_size == ULINT_UNDEFINED) {
-    tablespace_flags = 0;
-  } else {
-    tablespace_flags = (get_bit_shift(zip_size >> PAGE_ZIP_MIN_SIZE_SHIFT << 1)
-                        << DICT_TF_ZSSIZE_SHIFT) |
-                       DICT_TF_COMPACT |
-                       (DICT_TF_FORMAT_ZIP << DICT_TF_FORMAT_SHIFT);
-    ut_a(page_size_t(tablespace_flags).physical() == zip_size);
+  if (zip_size != 0 && zip_size != ULINT_UNDEFINED) {
+    space_flags |= (get_bit_shift(zip_size >> PAGE_ZIP_MIN_SIZE_SHIFT << 1)
+                    << DICT_TF_ZSSIZE_SHIFT) |
+                   DICT_TF_COMPACT |
+                   (DICT_TF_FORMAT_ZIP << DICT_TF_FORMAT_SHIFT);
+    ut_a(page_size_t(space_flags).physical() == zip_size);
   }
   *success =
       xb_space_create_file(real_name, space_id, space_flags, fil_space, &file);
@@ -6951,7 +6954,7 @@ static bool validate_options(const char *file, int argc, char **argv) {
   }
 
   const auto restore_argv0 = [argv](int *c, char **v) {
-    for (int i = 0; i < *c; ++i) {
+    for (int i = *c - 1; i >= 0; --i) {
       v[i + 1] = v[i];
     }
     v[0] = argv[0];
