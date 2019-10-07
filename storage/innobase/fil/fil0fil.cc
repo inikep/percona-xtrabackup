@@ -312,6 +312,9 @@ enum fil_load_status {
   /** The file(s) were not valid */
   FIL_LOAD_INVALID,
 
+  /** Invalid encrytion metadata in page 0 */
+  FIL_LOAD_INVALID_ENCRYPTION_META,
+
   /** The tablespace file ID in the first page doesn't match
   expected value. */
   FIL_LOAD_MISMATCH
@@ -6278,7 +6281,7 @@ fil_load_status Fil_shard::ibd_open_for_recovery(space_id_t space_id,
   if (err == DB_INVALID_ENCRYPTION_META) {
     bool success = fil_system->erase_path(space_id);
     ut_a(success);
-    return FIL_LOAD_NOT_FOUND;
+    return (FIL_LOAD_INVALID_ENCRYPTION_META);
   }
 
   ut_a(df.space_id() == space_id);
@@ -10425,7 +10428,10 @@ bool Fil_system::open_for_recovery(space_id_t space_id) {
                                      << space->name << " ID: " << space->id;
     }
 
-    return true;
+    return (true);
+  } else if (status == FIL_LOAD_INVALID_ENCRYPTION_META) {
+    ib::error() << "Invalid encryption metadata in tablespace header.";
+    exit(EXIT_FAILURE);
   }
 
   return false;
