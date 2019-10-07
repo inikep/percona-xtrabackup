@@ -689,7 +689,7 @@ dberr_t Datafile::validate_first_page(space_id_t space_id, lsn_t *flush_lsn,
         ut::free(m_encryption_iv);
         m_encryption_key = nullptr;
         m_encryption_iv = nullptr;
-        return (DB_CORRUPTION);
+        return (DB_INVALID_ENCRYPTION_META);
       }
     } else {
 #ifdef UNIV_DEBUG
