@@ -29,6 +29,7 @@ IF(NOT CMAKE_CROSSCOMPILING)
     comp_err.cc
     COMPONENT Test
     LINK_LIBRARIES mysys
+    SKIP_INSTALL
     )
 ENDIF()
 
@@ -117,18 +118,21 @@ MYSQL_ADD_EXECUTABLE(my_print_defaults
   my_print_defaults.cc
   COMPONENT Server
   LINK_LIBRARIES mysys
+  SKIP_INSTALL
   )
 MYSQL_ADD_EXECUTABLE(perror
   perror.cc
   COMPONENT Server
   DEPENDENCIES GenError
   LINK_LIBRARIES mysys
+  SKIP_INSTALL
   )
 IF(WITH_LZ4 STREQUAL "bundled")
   MYSQL_ADD_EXECUTABLE(lz4_decompress
     lz4_decompress.cc
     COMPONENT Server
     LINK_LIBRARIES ext::lz4 mysys
+    SKIP_INSTALL
     )
 ENDIF()
 
@@ -136,6 +140,7 @@ MYSQL_ADD_EXECUTABLE(zlib_decompress
   zlib_decompress.cc
   COMPONENT Server
   LINK_LIBRARIES ext::zlib mysys
+  SKIP_INSTALL
   )
 
 # All targets below belong to COMPONENT Server and depend on InnoDB.
@@ -158,6 +163,7 @@ MYSQL_ADD_EXECUTABLE(innochecksum
   COMPONENT Server
   DEPENDENCIES GenError
   LINK_LIBRARIES mysys innodb_zipdecompress ext::lz4 extra::rapidjson
+  SKIP_INSTALL
   )
 TARGET_COMPILE_DEFINITIONS(innochecksum PRIVATE UNIV_NO_ERR_MSGS UNIV_LIBRARY)
 IF(MY_COMPILER_IS_GNU_OR_CLANG)
@@ -177,6 +183,7 @@ MYSQL_ADD_EXECUTABLE(ibd2sdi
   COMPONENT Server
   DEPENDENCIES GenError
   LINK_LIBRARIES mysys innodb_zipdecompress ext::lz4 extra::rapidjson
+  SKIP_INSTALL
   )
 TARGET_COMPILE_DEFINITIONS(ibd2sdi PRIVATE UNIV_NO_ERR_MSGS UNIV_LIBRARY DISABLE_PSI_MEMORY)
 IF(MY_COMPILER_IS_GNU_OR_CLANG)
