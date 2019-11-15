@@ -9809,14 +9809,6 @@ static void fil_tablespace_encryption_init(const fil_space_t *space) {
       ib::error(ER_IB_MSG_343) << "Can't set encryption information"
                                << " for tablespace" << space->name << "!";
     }
-
-    ut::free(key.iv);
-    ut::free(key.ptr);
-
-    key.iv = nullptr;
-    key.ptr = nullptr;
-
-    key.space_id = std::numeric_limits<space_id_t>::max();
   }
 }
 
