@@ -2271,7 +2271,6 @@ ADD_SUBDIRECTORY(scripts)
 
 IF(NOT WITHOUT_SERVER)
   ADD_SUBDIRECTORY(mysql-test)
-  ADD_SUBDIRECTORY(support-files)
   IF(WITH_INTERNAL)
     ADD_SUBDIRECTORY(internal)
   ENDIF()
@@ -2337,13 +2336,6 @@ INCLUDE(${CMAKE_BINARY_DIR}/info_macros.cmake)
 # Source: This can be done during the cmake phase, all information is
 # available, but should be repeated on each "make" just in case someone
 # does "cmake ; make ; git pull ; make".
-CREATE_INFO_SRC(${CMAKE_BINARY_DIR}/Docs)
-MY_ADD_CUSTOM_TARGET(INFO_SRC ALL
-  COMMAND ${CMAKE_COMMAND} -P ${CMAKE_SOURCE_DIR}/cmake/info_src.cmake
-  BYPRODUCTS ${CMAKE_BINARY_DIR}/Docs/INFO_SRC
-  WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
-  COMMENT "Generating Docs/INFO_SRC"
-)
 
 IF(HAVE_BUILD_ID_SUPPORT AND NOT WITHOUT_SERVER AND NOT WITH_XTRABACKUP)
   # Show it by default in pushuild, but not for developers.
@@ -2454,16 +2446,6 @@ ENDIF()
 # RPM installs documentation directly from the source tree
 #
 IF(NOT INSTALL_LAYOUT MATCHES "RPM")
-  INSTALL(FILES
-    README
-    LICENSE
-    DESTINATION ${INSTALL_DOCREADMEDIR} COMPONENT Readme)
-  INSTALL(FILES
-    ${CMAKE_BINARY_DIR}/Docs/INFO_SRC
-    ${CMAKE_BINARY_DIR}/Docs/INFO_BIN
-    DESTINATION ${INSTALL_DOCDIR} COMPONENT Info
-    )
-
   # MYSQL_DOCS_LOCATON is used in "make dist",
   # points to the documentation directory
   SET(MYSQL_DOCS_LOCATION "" CACHE PATH
