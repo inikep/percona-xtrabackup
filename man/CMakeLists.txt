@@ -21,43 +21,12 @@
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA
 
 # Copy man pages
-SET(MAN1
-  comp_err.1
-  ibd2sdi.1
-  innochecksum.1
-  lz4_decompress.1
-  my_print_defaults.1
-  myisam_ftdump.1
-  myisamchk.1
-  myisamlog.1
-  myisampack.1
-  mysql.1
-  mysql_config.1
-  mysql_config_editor.1
-  mysql_secure_installation.1
-  mysql_ssl_rsa_setup.1
-  mysql_tzinfo_to_sql.1
-  mysql_upgrade.1
-  mysqladmin.1
-  mysqlbinlog.1
-  mysqlcheck.1
-  mysqldump.1
-  mysqldumpslow.1
-  mysqlimport.1
-  mysqlman.1
-  mysqlpump.1
-  mysqlshow.1
-  mysqlslap.1
-  perror.1
-  zlib_decompress.1
-  )
-
-IF(NOT WITH_SYSTEMD)
-  LIST(APPEND MAN1
-    mysql.server.1
-    mysqld_multi.1
-    mysqld_safe.1
-  )
+FILE(GLOB MAN1 *.1)
+FILE(GLOB MAN1_NDB ndb*.1)
+FILE(GLOB MAN8 *.8)
+FILE(GLOB MAN8_NDB ndb*.8)
+IF(MAN1_NDB AND NOT WITH_NDBCLUSTER)
+  LIST(REMOVE_ITEM MAN1 ${MAN1_NDB})
 ENDIF()
 
 SET(MAN1_NDB
@@ -106,15 +75,7 @@ SET(MAN8_NDB
 INSTALL(FILES ${MAN1} DESTINATION ${INSTALL_MANDIR}/man1 COMPONENT ManPages)
 INSTALL(FILES ${MAN8} DESTINATION ${INSTALL_MANDIR}/man8 COMPONENT ManPages)
 
-IF(WITH_ROUTER)
-  INSTALL(FILES ${MAN1_ROUTER}
-    DESTINATION ${INSTALL_MANDIR}/man1 COMPONENT ManPages
-    )
+IF(MAN8_NDB AND NOT WITH_NDBCLUSTER)
+  LIST(REMOVE_ITEM MAN8 ${MAN8_NDB})
 ENDIF()
-
-IF(WITH_NDBCLUSTER)
-  INSTALL(FILES ${MAN1_NDB}
-    DESTINATION ${INSTALL_MANDIR}/man1 COMPONENT ManPages)
-  INSTALL(FILES ${MAN8_NDB}
-    DESTINATION ${INSTALL_MANDIR}/man8 COMPONENT ManPages)
-ENDIF()
+INSTALL(FILES ${MAN8} DESTINATION ${INSTALL_MANDIR}/man8 COMPONENT ManPages)
