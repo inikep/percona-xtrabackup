@@ -18,11 +18,11 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA
 
 *******************************************************/
 
+#include <my_alloc.h>
 #include <my_default.h>
 #include <my_dir.h>
 #include <my_getopt.h>
 #include <my_sys.h>
-#include <my_alloc.h>
 #include <mysql/service_mysql_alloc.h>
 #include <signal.h>
 #include <typelib.h>
@@ -1046,7 +1046,7 @@ int main(int argc, char **argv) {
     container_name = opt_s3_bucket;
 
     if (!reinterpret_cast<S3_object_store *>(object_store.get())
-             ->probe_api_version_and_lookup()) {
+             ->probe_api_version_and_lookup(container_name)) {
       return EXIT_FAILURE;
     }
   } else if (opt_storage == GOOGLE) {
@@ -1073,7 +1073,7 @@ int main(int argc, char **argv) {
     container_name = opt_google_bucket;
 
     if (!reinterpret_cast<S3_object_store *>(object_store.get())
-             ->probe_api_version_and_lookup()) {
+             ->probe_api_version_and_lookup(container_name)) {
       return EXIT_FAILURE;
     }
   }
