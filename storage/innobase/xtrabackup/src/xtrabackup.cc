@@ -845,8 +845,7 @@ struct my_option xb_client_options[] = {
      &xtrabackup_encrypt_algo_typelib, GET_ENUM, REQUIRED_ARG, 0, 0, 0, 0, 0,
      0},
 
-    {"encrypt-key", OPT_XTRA_ENCRYPT_KEY, "Encryption key to use.",
-     (G_PTR *)&xtrabackup_encrypt_key, (G_PTR *)&xtrabackup_encrypt_key, 0,
+    {"encrypt-key", OPT_XTRA_ENCRYPT_KEY, "Encryption key to use.", 0, 0, 0,
      GET_STR_ALLOC, REQUIRED_ARG, 0, 0, 0, 0, 0, 0},
 
     {"encrypt-key-file", OPT_XTRA_ENCRYPT_KEY_FILE,
@@ -1592,6 +1591,14 @@ bool check_if_param_set(const char *param) {
   return param_set.find(param) != param_set.end();
 }
 
+static void hide_option(char *argument, char **opt) {
+  char *start = argument;
+  my_free(*opt);
+  *opt = my_strdup(PSI_NOT_INSTRUMENTED, argument, MYF(MY_FAE));
+  while (*argument) *argument++ = 'x'; /* Destroy argument */
+  if (*start) start[1] = 0;            /* Cut length of argument */
+}
+
 bool xb_get_one_option(int optid, const struct my_option *opt, char *argument) {
   static const char *hide_value[] = {"password", "encrypt-key",
                                      "transition-key"};
@@ -1761,11 +1768,7 @@ bool xb_get_one_option(int optid, const struct my_option *opt, char *argument) {
       if (argument == disabled_my_option)
         argument = (char *)""; /* Don't require password */
       if (argument) {
-        char *start = argument;
-        my_free(opt_password);
-        opt_password = my_strdup(PSI_NOT_INSTRUMENTED, argument, MYF(MY_FAE));
-        while (*argument) *argument++ = 'x'; /* Destroy argument */
-        if (*start) start[1] = 0;            /* Cut length of argument */
+        hide_option(argument, &opt_password);
         tty_password = false;
       } else
         tty_password = true;
@@ -1774,12 +1777,7 @@ bool xb_get_one_option(int optid, const struct my_option *opt, char *argument) {
       if (argument == disabled_my_option)
         argument = (char *)""; /* Don't require password */
       if (argument) {
-        char *start = argument;
-        my_free(opt_transition_key);
-        opt_transition_key =
-            my_strdup(PSI_NOT_INSTRUMENTED, argument, MYF(MY_FAE));
-        while (*argument) *argument++ = 'x'; /* Destroy argument */
-        if (*start) start[1] = 0;            /* Cut length of argument */
+        hide_option(argument, &opt_transition_key);
         tty_transition_key = false;
       } else
         tty_transition_key = true;
@@ -1787,6 +1785,9 @@ bool xb_get_one_option(int optid, const struct my_option *opt, char *argument) {
       break;
     case OPT_GENERATE_TRANSITION_KEY:
       use_dumped_tablespace_keys = true;
+      break;
+    case OPT_XTRA_ENCRYPT_KEY:
+      hide_option(argument, &xtrabackup_encrypt_key);
       break;
     case '?':
       usage();
