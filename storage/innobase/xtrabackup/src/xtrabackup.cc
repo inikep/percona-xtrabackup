@@ -6710,9 +6710,7 @@ skip_check:
     innodb_free_param();
   }
 
-  if (!use_dumped_tablespace_keys) {
-    xb_keyring_shutdown();
-  }
+  xb_keyring_shutdown();
 
   Tablespace_map::instance().serialize();
 
@@ -6724,9 +6722,7 @@ skip_check:
 
 error_cleanup:
 
-  if (!use_dumped_tablespace_keys) {
-    xb_keyring_shutdown();
-  }
+  xb_keyring_shutdown();
 
   xtrabackup_close_temp_log(false);
 
