@@ -102,11 +102,9 @@ heavy_index_rotation &
 job_id=$!
 
 while [ `mysql test -Ne "SELECT val FROM rcount"` -lt "3" ] ; do
-	sleep 1
+	sleep 0.1
 done
 
-xtrabackup --backup --lock-ddl-per-table --target-dir=$topdir/backup5
-xtrabackup --prepare --target-dir=$topdir/backup5
 
 if has_backup_locks ;
 then
