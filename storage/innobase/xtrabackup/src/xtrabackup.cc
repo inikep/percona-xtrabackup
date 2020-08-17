@@ -462,6 +462,7 @@ extern TYPELIB innodb_flush_method_typelib;
 
 #include "caching_sha2_passwordopt-vars.h"
 
+bool mdl_taken = FALSE;
 extern struct rand_struct sql_rand;
 extern mysql_mutex_t LOCK_sql_rand;
 
@@ -951,7 +952,8 @@ struct my_option xb_client_options[] = {
 
     {"lock-ddl-per-table", OPT_LOCK_DDL_PER_TABLE,
      "Lock DDL for each table "
-     "before xtrabackup starts to copy it and until the backup is completed.",
+     "before xtrabackup starts the copy phase and until the backup is "
+     "completed.",
      (uchar *)&opt_lock_ddl_per_table, (uchar *)&opt_lock_ddl_per_table, 0,
      GET_BOOL, NO_ARG, 0, 0, 0, 0, 0, 0},
 
@@ -2842,9 +2844,6 @@ static bool xtrabackup_copy_datafile(fil_node_t *node, uint thread_n) {
 
   bool is_system = !fsp_is_ibd_tablespace(node->space->id);
 
-  if (!is_system && opt_lock_ddl_per_table) {
-    mdl_lock_table(node->space->id);
-  }
 
   if (!is_system && check_if_skip_table(node_name)) {
     msg("[%02u] Skipping %s.\n", thread_n, node_name);
@@ -3431,8 +3430,8 @@ static void xb_register_table(
   xb_register_include_filter_entry(name);
 }
 
-static bool compile_regex(const char *regex_string, const char *error_context,
-                          xb_regex_t *compiled_re) {
+bool compile_regex(const char *regex_string, const char *error_context,
+                   xb_regex_t *compiled_re) {
   char errbuf[100];
   int ret = xb_regcomp(compiled_re, regex_string, REG_EXTENDED);
   if (ret != 0) {
@@ -3955,9 +3954,6 @@ void xtrabackup_backup_func(void) {
         xtrabackup_parallel);
   }
 
-  if (opt_lock_ddl_per_table) {
-    mdl_lock_init();
-  }
 
   auto it = datafiles_iter_new();
   if (it == NULL) {
@@ -4013,6 +4009,11 @@ void xtrabackup_backup_func(void) {
   Backup_context backup_ctxt;
   if (!backup_start(backup_ctxt)) {
     exit(EXIT_FAILURE);
+  }
+
+  if (opt_debug_sleep_before_unlock) {
+    msg_ts("Debug sleep for %u seconds\n", opt_debug_sleep_before_unlock);
+    std::this_thread::sleep_for(std::chrono::seconds(opt_debug_sleep_before_unlock));
   }
 
   if (!redo_mgr.stop_at(backup_ctxt.log_status.lsn)) {
@@ -6863,6 +6864,12 @@ bool xb_init() {
 
     if (!get_mysql_vars(mysql_connection)) {
       return (false);
+    }
+
+    if (opt_lock_ddl_per_table) {
+      msg_ts(
+          "Option --lock-ddl-per-table is deprecated. Please use "
+          "--lock-ddl instead.\n");
     }
 
     if (opt_check_privileges) {
