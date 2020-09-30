@@ -15,7 +15,7 @@ EOF
 }
 
 function ssl_version() {
-    sslv=$(readlink -f $(ldconfig -p | grep libssl.so | awk -F "=>" '{ print $2 }') | sed 's/.*[.]so//; s/[^0-9]//g')
+    sslv=$(ls -la {/,/usr/}{lib64,lib,lib/x86_64-linux-gnu}/libssl.so.1.* 2>/dev/null | sed 's/.*[.]so//; s/[^0-9]//g' | head -1)
 
     case ${sslv} in
         100|101) ;;
@@ -30,14 +30,17 @@ function ssl_version() {
     echo ${sslv}
 }
 
+shell_quote_string() {
+  echo "$1" | sed -e 's,\([^a-zA-Z0-9/_.=-]\),\\\1,g'
+}
+
 append_arg_to_args () {
     args="${args} "$(shell_quote_string "${1}")
 }
 
 parse_arguments() {
     pick_args=
-    if test "${1}" = PICK-ARGS-FROM-ARGV
-    then
+    if test "${1}" = PICK-ARGS-FROM-ARGV; then
         pick_args=1
         shift
     fi
@@ -51,8 +54,7 @@ parse_arguments() {
             --destdir=*) DESTDIR="${val}" ;;
             --help) usage ;;
             *)
-            if test -n "${pick_args}"
-            then
+            if test -n "${pick_args}"; then
                 append_arg_to_args "${arg}"
             fi
             ;;
@@ -78,20 +80,37 @@ main () {
 
     mkdir "${DESTDIR}"
 
-    if [[ "${TYPE}" == "innodb80" ]]; then
-        url="https://dev.mysql.com/get/Downloads/MySQL-8.0"
-        tarball="mysql-${VERSION}-linux-glibc2.12-${arch}.tar.xz"
-    else
-        url="https://www.percona.com/downloads/Percona-Server-8.0/Percona-Server-${VERSION}/binary/tarball"
-        if [[ $(echo ${VERSION} | awk -F "." '{ print $3 }' | cut -d '-' -f1) -lt "20" ]]; then
-            tarball="Percona-Server-${VERSION}-Linux.${arch}.ssl$(ssl_version).tar.gz"
-        elif [[ $(echo ${VERSION} | awk -F "." '{ print $3 }' | cut -d '-' -f1) -ge "20" ]]; then
-            tarball="Percona-Server-${VERSION}-Linux.x86_64.glibc2.12.tar.gz"
-        fi
-    fi
+    case "${TYPE}" in
+        innodb80)
+            url="https://dev.mysql.com/get/Downloads/MySQL-8.0"
+            fallback_url="https://downloads.mysql.com/archives/get/p/23/file"
+            tarball="mysql-${VERSION}-linux-glibc2.12-${arch}.tar.xz"
+                if ! wget --spider "${url}/${tarball}" 2>/dev/null; then
+                    unset url
+                    url=${fallback_url}
+                fi
+            ;;
+        xtradb80)
+            url="https://www.percona.com/downloads/Percona-Server-8.0/Percona-Server-${VERSION}/binary/tarball"
+	    short_version=$(echo ${VERSION} | awk -F "." '{ print $3 }' | cut -d '-' -f1)
+            if [[ ${short_version} -lt "20" ]]; then
+                tarball="Percona-Server-${VERSION}-Linux.${arch}.ssl$(ssl_version).tar.gz"
+            elif [[ ${short_version} -ge "20" && ${short_version} -lt "22" ]]; then
+                tarball="Percona-Server-${VERSION}-Linux.${arch}.glibc2.12.tar.gz"
+            elif [[ ${short_version} -ge "22" ]]; then
+                tarball="Percona-Server-${VERSION}-Linux.${arch}.glibc2.17.tar.gz"
+            fi
+            ;;
+        *) 
+            echo "Err: Specified unsupported ${TYPE}."
+            echo "Supported types are: innodb80, xtradb80."
+            echo "Example: $0 --type=xtradb80 --version=8.0.18-9"
+            exit 1
+            ;;
+    esac
 
     # Check if tarball exist before any download
-    if ! wget --spider "${url}/${tarball}" 2>/dev/null; then
+    if ! wget --spider "${url}/${tarball}" 2>/dev/null; then            
         echo "Version you specified(${VERSION}) is not exist on ${url}/${tarball}"
         exit 1
     else
