@@ -372,13 +372,14 @@ static bool check_server_version(unsigned long version_number,
   }
 
   version_supported =
-      version_supported || (version_number > 80000 && version_number < 90000);
+      version_supported || (version_number > 80000 && version_number <= 80099);
 
   mysql51 = version_number > 50100 && version_number < 50500;
   pxb24 = pxb24 || (mysql51 && innodb_version != NULL);
   pxb24 = pxb24 || (version_number > 50500 && version_number < 50800);
   pxb24 = pxb24 || ((version_number > 100000 && version_number < 100300) &&
                     server_flavor == FLAVOR_MARIADB);
+
 
   if (!version_supported) {
     msg("Error: Unsupported server version: '%s'.\n"
@@ -393,9 +394,10 @@ static bool check_server_version(unsigned long version_number,
     if (pxb24) {
       msg("Please use Percona XtraBackup 2.4 for this database.\n");
     }
+    return false;
   }
 
-  return (version_supported);
+  return true;
 }
 
 /*********************************************************************/ /**
