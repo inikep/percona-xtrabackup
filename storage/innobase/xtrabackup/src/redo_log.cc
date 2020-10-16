@@ -975,6 +975,8 @@ bool Redo_Log_Data_Manager::start() {
    */
   mdl_taken = true;
 
+  debug_sync_point("xtrabackup_pause_after_redo_catchup");
+
   thread.start();
 
   error = false;
