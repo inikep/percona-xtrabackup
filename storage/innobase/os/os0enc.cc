@@ -648,15 +648,13 @@ bool Encryption::decode_encryption_info(space_id_t space_id,
     version = VERSION_2;
   } else if (memcmp(ptr, KEY_MAGIC_V3, MAGIC_SIZE) == 0) {
     version = VERSION_3;
-  } else {
+  } else if (memcmp(ptr, KEY_MAGIC_EMPTY, MAGIC_SIZE) == 0) {
     /* We don't report an error during recovery, since the
     encryption info maybe hasn't written into datafile when
     the table is newly created. For clone encryption information
     should have been already correct. */
-    if (recv_recovery_is_on() && !recv_sys->is_cloned_db) {
-      return (true);
-    }
-
+    return (recv_recovery_is_on() ? true : false);
+  } else {
     ib::error(ER_IB_MSG_837) << "Failed to decrypt encryption information,"
                              << " found unexpected version of it!";
     return (false);
