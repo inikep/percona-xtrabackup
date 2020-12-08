@@ -4,10 +4,6 @@
 ``lock-ddl-per-table`` Option Improvements
 ===========================================
 
-|MySQL| 5.7 has made improvements to bulk loading, one of these improvements
-is the ability to disable redo logging, which increased the speed of
-ADD INDEX operations.
-
 To block DDL statements on an instance, Percona Server implemented
 LOCK TABLES FOR BACKUP. |Percona XtraBackup| uses this lock for the duration
 of the backup. This lock does not affect DML statements.
@@ -26,7 +22,7 @@ The following procedures describe a simplified backup operation when using
 
 4. Iterate through the list. The following steps occur with each listed tablespace:
 
-    a. Query INFORMATION_SCHEMA.INNODB_SYS_TABLES to find which tables belong
+    a. Query INFORMATION_SCHEMA.INNODB_TABLES to find which tables belong
     to the tablespace ID and take a MDL on the underlying table or tables
     in case there is a shared tablespace.
     
@@ -44,7 +40,7 @@ These assumptions may not be correct and may lead to inconsistent backups.
 ``--lock-ddl-per-table`` redesign
 ----------------------------------
 
-Implemented in |Percona XtraBackup| version 2.4.21, the
+Implemented in |Percona XtraBackup| version 8.0.22-15.0, the
 ``--lock-ddl-per-table`` has been redesigned to minimize inconsistent backups.
 The following procedure reorders the steps:
 
@@ -73,6 +69,10 @@ is skipped.
 * For a FullText Index, an MDL is acquired on the base table.
 
 * A ``SELECT`` query that acquires an MDL does not retrieve any data.
+
+.. warning::
+
+    The ``lock-ddl-per-table`` variable is deprecated in |Percona Server| 8.0. Use ``--lock-ddl`` instead of this variable.
 
 
 
