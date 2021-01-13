@@ -2303,7 +2303,7 @@ static bool innodb_init(bool init_dd, bool for_apply_log) {
     return (false);
   }
 
-  lsn_t to_lsn = ULLONG_MAX;
+  lsn_t to_lsn = LSN_MAX;
   if (for_apply_log && (metadata_type == METADATA_FULL_BACKUP ||
                         xtrabackup_incremental_dir != nullptr)) {
     to_lsn = (xtrabackup_incremental_dir == nullptr) ? metadata_last_lsn
@@ -4057,7 +4057,8 @@ void xtrabackup_backup_func(void) {
     std::this_thread::sleep_for(std::chrono::seconds(opt_debug_sleep_before_unlock));
   }
 
-  if (!redo_mgr.stop_at(backup_ctxt.log_status.lsn)) {
+  if (!redo_mgr.stop_at(backup_ctxt.log_status.lsn,
+                        backup_ctxt.log_status.lsn_checkpoint)) {
     exit(EXIT_FAILURE);
   }
   if (redo_mgr.is_error()) {
