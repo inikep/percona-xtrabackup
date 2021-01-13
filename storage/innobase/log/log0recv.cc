@@ -3365,6 +3365,11 @@ bool meb_scan_log_recs(
   ut_ad(len >= OS_FILE_LOG_BLOCK_SIZE);
 
   do {
+    if (scanned_lsn >= to_lsn) {
+      finished = true;
+      break;
+    }
+
     ut_ad(!finished);
 
     Log_data_block_header block_header;
@@ -3470,6 +3475,10 @@ bool meb_scan_log_recs(
       recv_track_changes_of_recovered_lsn();
     }
 
+    // adjust data_len if we are in last block, so it stops at exact to_lsn
+    if (scanned_lsn + data_len > to_lsn) {
+      data_len = to_lsn - scanned_lsn;
+    }
     scanned_lsn += data_len;
 
     if (scanned_lsn > recv_sys->scanned_lsn) {

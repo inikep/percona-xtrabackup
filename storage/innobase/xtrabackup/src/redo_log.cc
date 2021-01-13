@@ -50,10 +50,6 @@ bool Redo_Log_Reader::find_start_checkpoint_lsn() {
   return (true);
 }
 
-bool Redo_Log_Reader::find_last_checkpoint_lsn(lsn_t *lsn) {
-  return (true);
-}
-
 byte *Redo_Log_Reader::get_header() const { return log_hdr_buf; }
 
 byte *Redo_Log_Reader::get_buffer() const { return log_buf; }
@@ -968,12 +964,10 @@ bool Redo_Log_Data_Manager::is_error() const { return (error); }
 
 Redo_Log_Data_Manager::~Redo_Log_Data_Manager() { os_event_destroy(event); }
 
-bool Redo_Log_Data_Manager::stop_at(lsn_t lsn) {
-  bool last_checkpoint = reader.find_last_checkpoint_lsn(&last_checkpoint_lsn);
-  if (last_checkpoint) {
-    msg("xtrabackup: The latest check point (for incremental): '" LSN_PF "'\n",
-        last_checkpoint_lsn);
-  }
+bool Redo_Log_Data_Manager::stop_at(lsn_t lsn, lsn_t checkpoint_lsn) {
+  last_checkpoint_lsn = checkpoint_lsn;
+  msg("xtrabackup: The latest check point (for incremental): '" LSN_PF "'\n",
+      last_checkpoint_lsn);
   msg("xtrabackup: Stopping log copying thread at LSN " LSN_PF ".\n", lsn);
 
   stop_lsn = lsn;
@@ -995,7 +989,7 @@ bool Redo_Log_Data_Manager::stop_at(lsn_t lsn) {
     return (false);
   }
 
-  return last_checkpoint;
+  return (true);
 }
 
 void Redo_Log_Data_Manager::close() {
