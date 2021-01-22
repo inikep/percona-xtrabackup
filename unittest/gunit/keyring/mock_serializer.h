@@ -1,4 +1,4 @@
-/* Copyright (c) 2016, 2023, Oracle and/or its affiliates.
+/* Copyright (c) 2016, Oracle and/or its affiliates. All rights reserved.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -20,28 +20,22 @@
    along with this program; if not, write to the Free Software
    Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA */
 
-#ifndef IKEYRINGIO_INCLUDED
-#define IKEYRINGIO_INCLUDED
+#ifndef MOCK_SERIALIZER_H
+#define MOCK_SERIALIZER_H
+
+#include <gmock/gmock.h>
 
 #include "plugin/keyring/common/i_serializer.h"
-#include "plugin/keyring/common/keyring_key.h"
 
 namespace keyring {
-
-class IKeyring_io : public Keyring_alloc {
+class Mock_serializer : public ISerializer {
  public:
-  virtual bool init(const std::string *keyring_storage_url) = 0;
-  virtual bool flush_to_backup(ISerialized_object *serialized_object) = 0;
-  virtual bool flush_to_storage(ISerialized_object *serialized_object) = 0;
-
-  virtual ISerializer *get_serializer() = 0;
-  virtual bool get_serialized_object(
-      ISerialized_object **serialized_object) = 0;
-  virtual bool has_next_serialized_object() = 0;
-
-  virtual ~IKeyring_io() = default;
+  MOCK_METHOD3(
+      serialize,
+      ISerialized_object *(
+          const collation_unordered_map<std::string, std::unique_ptr<IKey>> &,
+          IKey *, Key_operation));
 };
-
 }  // namespace keyring
 
-#endif  // IKEYRINGIO_INCLUDED
+#endif  // MOCK_SERIALIZER_H
