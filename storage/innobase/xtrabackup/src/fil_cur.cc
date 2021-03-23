@@ -1,6 +1,6 @@
 /******************************************************
 XtraBackup: hot backup tool for InnoDB
-(c) 2009-2013 Percona LLC and/or its affiliates.
+(c) 2009, 2021 Percona LLC and/or its affiliates.
 Originally Created 3/3/2009 Yasufumi Kinoshita
 Written by Alexey Kopytov, Aleksandr Kuzminsky, Stewart Smith, Vadim Tkachenko,
 Yasufumi Kinoshita, Ignacio Nin and Baron Schwartz.
@@ -258,32 +258,27 @@ static bool is_page_corrupted(bool check_lsn, const byte *read_buf,
   return reporter.is_corrupted();
 }
 
-/************************************************************************
-Reads and verifies the next block of pages from the source
+/** Reads and verifies the next block of pages from the source
 file. Positions the cursor after the last read non-corrupted page.
-
+@param[in/out]	cursor	 	source file cursor
+@param[in]	offset	 	offset of file to read from
+@param[in]	to_read		bytest to read
 @return XB_FIL_CUR_SUCCESS if some have been read successfully, XB_FIL_CUR_EOF
-if there are no more pages to read and XB_FIL_CUR_ERROR on error. */
-xb_fil_cur_result_t xb_fil_cur_read(
-    /*============*/
-    xb_fil_cur_t *cursor) /*!< in/out: source file cursor */
-{
+if there are no more pages to read and XB_FIL_CUR_ERROR on error */
+xb_fil_cur_result_t xb_fil_cur_read_from_offset(xb_fil_cur_t *cursor,
+                                                uint64_t offset,
+                                                uint64_t to_read) {
   dberr_t err;
   byte *page, *page_to_check;
   ulint i;
   ulint npages;
   ulint retry_count;
   xb_fil_cur_result_t ret;
-  uint64_t offset;
-  uint64_t to_read;
   ulong n_read;
   page_size_t page_size(
       cursor->zip_size != 0 ? cursor->zip_size : cursor->page_size,
       cursor->page_size, cursor->zip_size != 0);
   IORequest read_request(IORequest::READ | IORequest::NO_COMPRESSION);
-
-  cursor->read_filter->get_next_batch(&cursor->read_filter_ctxt, &offset,
-                                      &to_read);
 
   if (to_read == 0LL) {
     return (XB_FIL_CUR_EOF);
@@ -427,6 +422,18 @@ read_retry:
   posix_fadvise(cursor->file.m_file, offset, to_read, POSIX_FADV_DONTNEED);
 
   return (ret);
+}
+
+/** Reads and verifies the next block of pages from the source
+file. Positions the cursor after the last read non-corrupted page.
+@param[in/out] cursor	source file cursor
+@return XB_FIL_CUR_SUCCESS if some have been read successfully, XB_FIL_CUR_EOF
+if there are no more pages to read and XB_FIL_CUR_ERROR on error. */
+xb_fil_cur_result_t xb_fil_cur_read(xb_fil_cur_t *cursor) {
+  uint64_t offset;
+  uint64_t to_read;
+  cursor->read_filter->get_next_batch(cursor, &offset, &to_read);
+  return xb_fil_cur_read_from_offset(cursor, offset, to_read);
 }
 
 /************************************************************************

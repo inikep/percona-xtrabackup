@@ -77,6 +77,7 @@ MY_ADD_COMPILE_DEFINITIONS(
 
 MYSQL_ADD_EXECUTABLE(xtrabackup
   xtrabackup.cc
+  changed_page_tracking.cc
   datasink.cc
   ds_buffer.cc
   ds_compress.cc
