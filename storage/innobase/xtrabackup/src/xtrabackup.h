@@ -22,7 +22,7 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA
 #define XB_XTRABACKUP_H
 
 #include <my_getopt.h>
-#include "changed_page_bitmap.h"
+#include "changed_page_tracking.h"
 #include "datasink.h"
 #include "xb_regex.h"
 #include "xbstream.h"
@@ -64,6 +64,8 @@ enum xtrabackup_compress_t {
 
 /* value of the --incremental option */
 extern lsn_t incremental_lsn;
+extern lsn_t incremental_start_checkpoint_lsn;
+extern lsn_t page_tracking_start_lsn;
 
 extern char *xtrabackup_target_dir;
 extern char xtrabackup_real_target_dir[FN_REFLEN];
@@ -75,7 +77,7 @@ extern ds_ctxt_t *ds_meta;
 extern ds_ctxt_t *ds_data;
 extern ds_ctxt_t *ds_uncompressed_data;
 
-extern xb_page_bitmap *changed_page_bitmap;
+extern pagetracking::xb_space_map *changed_page_tracking;
 
 extern ulint xtrabackup_rebuild_threads;
 
@@ -137,6 +139,7 @@ extern longlong xtrabackup_use_memory;
 
 extern bool opt_galera_info;
 extern bool opt_slave_info;
+extern bool opt_page_tracking;
 extern bool opt_no_lock;
 extern bool opt_safe_slave_backup;
 extern bool opt_rsync;

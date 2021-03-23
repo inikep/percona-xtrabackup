@@ -138,7 +138,6 @@ struct Backup_context {
 };
 
 /* server capabilities */
-extern bool have_changed_page_bitmaps;
 extern bool have_backup_locks;
 extern bool have_lock_wait_timeout;
 extern bool have_galera_enabled;
@@ -165,8 +164,6 @@ void capture_tool_command(int argc, char **argv);
 
 bool select_history();
 
-bool flush_changed_page_bitmaps();
-
 void backup_cleanup();
 
 bool get_mysql_vars(MYSQL *connection);
@@ -192,9 +189,10 @@ void unlock_all(MYSQL *connection);
 
 bool write_current_binlog_file(MYSQL *connection);
 
-/** Read binaty log position and InnoDB LSN from p_s.log_status.
+/** Read binary log position and InnoDB LSN from p_s.log_status.
 @param[in]   conn         mysql connection handle */
 const log_status_t &log_status_get(MYSQL *conn);
+
 
 /*********************************************************************/ /**
  Retrieves MySQL binlog position and
