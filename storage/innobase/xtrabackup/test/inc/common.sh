@@ -283,6 +283,7 @@ function switch_server()
 
     MYSQL_ARGS="--defaults-file=$MYSQLD_VARDIR/my.cnf "
     MYSQLD_ARGS="--defaults-file=$MYSQLD_VARDIR/my.cnf ${MYSQLD_EXTRA_ARGS}"
+    MYSQLDUMP_ARGS=
     if [ "`whoami`" = "root" ]
     then
 	MYSQLD_ARGS="$MYSQLD_ARGS --user=root"
@@ -549,15 +550,15 @@ plugin_dir=${MYSQL_BASEDIR}/lib/plugin/debug"
 
     # config GR User
     ${MYSQL} ${MYSQL_ARGS} -e "SET SQL_LOG_BIN=0;
-    CREATE USER rpl_user@'localhost' IDENTIFIED BY 'password' REQUIRE SSL;
+    CREATE USER IF NOT EXISTS rpl_user@'localhost' IDENTIFIED BY 'password' REQUIRE SSL;
     GRANT REPLICATION SLAVE ON *.* TO rpl_user@'localhost';
     GRANT BACKUP_ADMIN ON *.* TO rpl_user@'localhost';
-    CREATE USER rpl_user@'%' IDENTIFIED BY 'password' REQUIRE SSL;
+    CREATE USER IF NOT EXISTS rpl_user@'%' IDENTIFIED BY 'password' REQUIRE SSL;
     GRANT REPLICATION SLAVE ON *.* TO rpl_user@'%';
     GRANT BACKUP_ADMIN ON *.* TO rpl_user@'%';
     FLUSH PRIVILEGES;
-    SET SQL_LOG_BIN=1;
-    CHANGE MASTER TO MASTER_USER='rpl_user', MASTER_PASSWORD='password' FOR CHANNEL 'group_replication_recovery';"
+    SET SQL_LOG_BIN=1;"
+    ${MYSQL} ${MYSQL_ARGS} -e "RESET SLAVE; CHANGE MASTER TO MASTER_USER='rpl_user', MASTER_PASSWORD='password' FOR CHANNEL 'group_replication_recovery';"
 
     # Start/Bootstrap cluster
     if [[ ${i} -eq 1 ]];
@@ -811,7 +812,7 @@ EOF
 ##########################################################################
 function record_db_state()
 {
-    $MYSQLDUMP $MYSQL_ARGS -t --compact --skip-extended-insert \
+    $MYSQLDUMP $MYSQL_ARGS $MYSQLDUMP_ARGS -t --compact --skip-extended-insert \
         $1 >"$topdir/tmp/$1_old.sql"
 }
 
@@ -822,7 +823,7 @@ function record_db_state()
 ##########################################################################
 function verify_db_state()
 {
-    $MYSQLDUMP $MYSQL_ARGS -t --compact --skip-extended-insert \
+    $MYSQLDUMP $MYSQL_ARGS $MYSQLDUMP_ARGS -t --compact --skip-extended-insert \
         $1 >"$topdir/tmp/$1_new.sql"
     diff -u "$topdir/tmp/$1_old.sql" "$topdir/tmp/$1_new.sql"
 }
