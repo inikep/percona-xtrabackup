@@ -1387,6 +1387,9 @@ bool write_slave_info(MYSQL *connection) {
   int channel_idx = 0;
   for (auto &channel : log_status.channels) {
     auto ch = channels.find(channel.channel_name);
+    if (channel.channel_name == "group_replication_applier" ||
+        channel.channel_name == "group_replication_recovery")
+      continue;
     std::string for_channel;
 
     if (!channel.channel_name.empty()) {
