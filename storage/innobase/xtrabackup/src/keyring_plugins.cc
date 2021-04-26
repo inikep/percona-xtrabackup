@@ -26,6 +26,7 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
 #include <mysqld.h>
 #include <sql/basic_istream.h>
 #include <sql/basic_ostream.h>
+#include <sql/server_component/mysql_server_keyring_lockable_imp.h>
 #include <sql/sql_list.h>
 #include <sql/sql_plugin.h>
 #include <sql_plugin.h>
@@ -55,6 +56,42 @@ const size_t XTRABACKUP_KEYS_MAGIC_SIZE = 7;
 
 static MEM_ROOT argv_alloc{PSI_NOT_INSTRUMENTED, 512};
 
+/** Initialize component service handles */
+SERVICE_TYPE(registry) *reg_srv = nullptr;
+bool xb_intitialize_service_handles() {
+  DBUG_TRACE;
+
+  auto cleanup = [&]() {
+    /* Add module specific deinitialization here */
+    innobase::encryption::deinit_keyring_services(reg_srv);
+    mysql_plugin_registry_release(reg_srv);
+  };
+
+  reg_srv = mysql_plugin_registry_acquire();
+  if (reg_srv == nullptr) {
+    msg("xtrabackup: mysql_plugin_registry_acquire failed\n");
+    return false;
+  }
+
+  /* Add module specific initialization here */
+  if (innobase::encryption::init_keyring_services(reg_srv) == false) {
+    msg("xtrabackup: init_keyring_services failed\n");
+    cleanup();
+    return false;
+  }
+  msg("xtrabackup: xb_intitialize_service_handles suceeded\n");
+  return true;
+}
+/** Deinitialize compoent service handles */
+void xb_deinitialize_service_handles() {
+  DBUG_TRACE;
+
+  innobase::encryption::deinit_keyring_services(reg_srv);
+  if (reg_srv != nullptr) {
+    mysql_plugin_registry_release(reg_srv);
+  }
+}
+
 /** Load plugins and keep argc and argv untouched */
 static void init_plugins(int argc, char **argv) {
   int t_argc = argc;
@@ -64,7 +101,20 @@ static void init_plugins(int argc, char **argv) {
   memcpy(t_argv, argv, sizeof(char *) * t_argc);
 
   mysql_optional_plugins[0] = 0;
-  mysql_mandatory_plugins[0] = 0;
+
+    /* Initialize component service handles */
+    if (xb_intitialize_service_handles() == false) {
+      msg("xtrabackup: Error: failed to component service handles\n");
+      exit(EXIT_FAILURE);
+    }
+    for (st_mysql_plugin **plugin = mysql_mandatory_plugins; *plugin;
+         plugin++) {
+      if (strcmp((*plugin)->name, "daemon_keyring_proxy_plugin") == 0) {
+        mysql_mandatory_plugins[0] = *plugin;
+        mysql_mandatory_plugins[1] = 0;
+        break;
+      }
+    }
 
   if (opt_xtra_plugin_dir != NULL) {
     strncpy(opt_plugin_dir, opt_xtra_plugin_dir, FN_REFLEN);
@@ -338,7 +388,6 @@ from my.cnf.
 @return true if success */
 bool xb_keyring_init_for_copy_back(int argc, char **argv) {
   mysql_optional_plugins[0] = 0;
-  mysql_mandatory_plugins[0] = 0;
 
   if (opt_xtra_plugin_dir != NULL) {
     strncpy(opt_plugin_dir, opt_xtra_plugin_dir, FN_REFLEN);
@@ -415,7 +464,6 @@ bool xb_keyring_init_for_copy_back(int argc, char **argv) {
           my_strdup(PSI_NOT_INSTRUMENTED, plugin_name, MYF(MY_FAE))));
     }
   }
-
   init_plugins(argc, argv);
 
   delete[] old_t_argv;
@@ -731,6 +779,7 @@ error:
 
 /** Shutdown keyring plugins. */
 void xb_keyring_shutdown() {
+  release_keyring_handles();
   plugin_shutdown();
 
   I_List_iterator<i_string> iter(*opt_plugin_load_list_ptr);
@@ -740,4 +789,5 @@ void xb_keyring_shutdown() {
   }
 
   free_list(opt_plugin_load_list_ptr);
+  xb_deinitialize_service_handles();
 }
