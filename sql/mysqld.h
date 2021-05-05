@@ -133,6 +133,7 @@ ulong sql_rnd_with_mutex();
 
 struct System_status_var *get_thd_status_var(THD *thd, bool *aggregated);
 #ifdef XTRABACKUP
+int setup_error_log_components();
 bool component_infrastructure_deinit();
 bool component_infrastructure_init();
 #endif /* XTRABACKUP */
