@@ -142,6 +142,7 @@ ENDMACRO(MYSQL_ADD_COMPONENT)
 # Add all CMake projects under components
 MACRO(CONFIGURE_COMPONENTS)
   SET(dirs_components
+    ${CMAKE_SOURCE_DIR}/components/keyrings
     ${CMAKE_SOURCE_DIR}/components/libminchassis
     ${CMAKE_SOURCE_DIR}/components/library_mysys
     ${CMAKE_SOURCE_DIR}/components/mysql_server)
