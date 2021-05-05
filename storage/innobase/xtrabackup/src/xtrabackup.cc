@@ -105,6 +105,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "ds_encrypt.h"
 #include "ds_tmpfile.h"
 #include "fil_cur.h"
+#include "keyring_components.h"
 #include "keyring_plugins.h"
 #include "read_filt.h"
 #include "redo_log.h"
@@ -318,6 +319,7 @@ static char *internal_innobase_data_file_path = NULL;
 char *opt_transition_key = NULL;
 char *opt_xtra_plugin_dir = NULL;
 char *opt_xtra_plugin_load = NULL;
+char *opt_keyring_file_data = nullptr;
 
 bool opt_generate_new_master_key = false;
 bool opt_generate_transition_key = false;
@@ -677,6 +679,7 @@ enum options_xtrabackup {
   OPT_SAFE_SLAVE_BACKUP_TIMEOUT,
   OPT_XB_SECURE_AUTH,
   OPT_TRANSITION_KEY,
+  OPT_KEYRING_FILE_DATA,
   OPT_GENERATE_TRANSITION_KEY,
   OPT_XTRA_PLUGIN_DIR,
   OPT_XTRA_PLUGIN_LOAD,
@@ -1249,6 +1252,11 @@ struct my_option xb_client_options[] = {
      "Generate transition key and store it into keyring.",
      &opt_generate_transition_key, &opt_generate_transition_key, 0, GET_BOOL,
      NO_ARG, 0, 0, 0, 0, 0, 0},
+
+     {"keyring-file-data", OPT_KEYRING_FILE_DATA,
+      "Path to keyring file.",
+      &opt_keyring_file_data, &opt_keyring_file_data, 0, GET_STR,
+      OPT_ARG, 0, 0, 0, 0, 0, 0},
 
     {"parallel", OPT_XTRA_PARALLEL,
      "Number of threads to use for parallel datafiles transfer. "
@@ -3909,14 +3917,17 @@ void xtrabackup_backup_func(void) {
 
   xb_filters_init();
 
-  if (!xb_keyring_init_for_backup(mysql_connection)) {
+  if (have_keyring_component &&
+      !xtrabackup::components::keyring_init_online(mysql_connection)) {
+    msg("xtrabackup: Error: failed to init keyring component\n");
+    exit(EXIT_FAILURE);
+  }
+  if (!xtrabackup::components::keyring_component_initialized &&
+      !xb_keyring_init_for_backup(mysql_connection)) {
     msg("xtrabackup: Error: failed to init keyring plugin\n");
     exit(EXIT_FAILURE);
   }
-
-  if (!validate_options("my", orig_argc, orig_argv)) {
-    exit(EXIT_FAILURE);
-  }
+  xtrabackup::components::inititialize_service_handles();
 
   if (opt_tables_compatibility_check) {
     xb_tables_compatibility_check();
@@ -3946,6 +3957,9 @@ void xtrabackup_backup_func(void) {
 
   debug_sync_point("after_redo_log_manager_init");
 
+  if (!validate_options("my", orig_argc, orig_argv)) {
+    exit(EXIT_FAILURE);
+  }
   /* create extra LSN dir if it does not exist. */
   if (xtrabackup_extra_lsndir &&
       !my_stat(xtrabackup_extra_lsndir, &stat_info, MYF(0)) &&
@@ -4465,12 +4479,17 @@ static void xtrabackup_stats_func(int argc, char **argv) {
   srv_read_only_mode = true;
 
   init_mysql_environment();
-
-  if (!xb_keyring_init_for_stats(argc, argv)) {
+  if(!xtrabackup::components::keyring_init_offline())
+  {
+    msg("xtrabackup: Error: failed to init keyring component\n");
+    exit(EXIT_FAILURE);
+  }
+  if (!xtrabackup::components::keyring_component_initialized &&
+      !xb_keyring_init_for_stats(argc, argv)) {
     msg("xtrabackup: error: failed to init keyring plugin.\n");
     exit(EXIT_FAILURE);
   }
-
+  xtrabackup::components::inititialize_service_handles();
   if (!validate_options("my", orig_argc, orig_argv)) {
     exit(EXIT_FAILURE);
   }
@@ -6472,10 +6491,17 @@ skip_check:
       goto error_cleanup;
     }
   } else {
-    if (!xb_keyring_init_for_prepare(argc, argv)) {
+    if(!xtrabackup::components::keyring_init_offline())
+    {
+      msg("xtrabackup: Error: failed to init keyring component\n");
+      goto error_cleanup;
+    }
+    if (!xtrabackup::components::keyring_component_initialized &&
+        !xb_keyring_init_for_prepare(argc, argv)) {
       msg("xtrabackup: Error: failed to init keyring plugin\n");
       goto error_cleanup;
     }
+    xtrabackup::components::inititialize_service_handles();
     if (xb_tablespace_keys_exist()) {
       use_dumped_tablespace_keys = true;
       if (!xb_tablespace_keys_load(xtrabackup_incremental, NULL, 0)) {
@@ -7374,6 +7400,15 @@ void setup_error_messages() {
   my_default_lc_messages->errmsgs->read_texts();
 }
 
+void xb_set_plugin_dir()
+{
+  if (opt_xtra_plugin_dir != NULL) {
+    strncpy(opt_plugin_dir, opt_xtra_plugin_dir, FN_REFLEN);
+  } else {
+    strcpy(opt_plugin_dir, PLUGINDIR);
+  }
+}
+
 /* ================= main =================== */
 
 int main(int argc, char **argv) {
@@ -7423,7 +7458,7 @@ int main(int argc, char **argv) {
   my_load_path(xtrabackup_real_target_dir, xtrabackup_target_dir, cwd);
   unpack_dirname(xtrabackup_real_target_dir, xtrabackup_real_target_dir);
   xtrabackup_target_dir = xtrabackup_real_target_dir;
-
+  xb_set_plugin_dir();
   if (xtrabackup_incremental_basedir) {
     my_load_path(xtrabackup_real_incremental_basedir,
                  xtrabackup_incremental_basedir, cwd);
@@ -7576,6 +7611,7 @@ int main(int argc, char **argv) {
   setup_error_messages();
 
   init_error_log();
+  setup_error_log_components();
   atexit(destroy_error_log);
 
   /* --backup */
