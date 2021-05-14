@@ -190,11 +190,9 @@ get_system(){
 
 enable_venv(){
     if [ "$OS" == "rpm" ]; then
-        if [ "${RHEL}" -eq 8 ]; then
-            export PATH="/usr/local/bin:$PATH"
-        elif [ "${RHEL}" -eq 7 ]; then
+        if [ "${RHEL}" -eq 7 ]; then
             source /opt/rh/devtoolset-7/enable
-            export PATH="/usr/local/bin:$PATH"
+            source /opt/rh/rh-python36/enable
             export CMAKE_BIN="cmake3"
         elif [ "${RHEL}" -eq 6 ]; then
             source /opt/rh/devtoolset-7/enable
@@ -226,12 +224,21 @@ install_deps() {
             PKGLIST+=" binutils-devel python3-pip python3-setuptools python3-wheel"
             PKGLIST+=" libcurl-devel cmake libaio-devel zlib-devel libev-devel bison make gcc"
             PKGLIST+=" rpm-build libgcrypt-devel ncurses-devel readline-devel openssl-devel gcc-c++"
-            PKGLIST+=" vim-common rpmlint patchelf"
+            PKGLIST+=" vim-common rpmlint patchelf python3-sphinx"
+            DEVTOOLSET10_PKGLIST+=" gcc-toolset-10-gcc-c++ gcc-toolset-10-binutils"
+            DEVTOOLSET10_PKGLIST+=" gcc-toolset-10-valgrind gcc-toolset-10-valgrind-devel gcc-toolset-10-libatomic-devel"
+            DEVTOOLSET10_PKGLIST+=" gcc-toolset-10-libasan-devel gcc-toolset-10-libubsan-devel"
+            dnf config-manager --set-enabled powertools
             until yum -y install ${PKGLIST}; do
                 echo "waiting"
                 sleep 1
             done
-            /usr/bin/pip3 install sphinx
+            yum -y install centos-release-stream
+            until yum -y install ${DEVTOOLSET10_PKGLIST}; do
+                echo "waiting"
+                sleep 1
+            done       
+            yum -y remove centos-release-stream
         else
             until yum -y install epel-release centos-release-scl; do
                 yum clean all
@@ -251,7 +258,7 @@ install_deps() {
             PKGLIST+=" zlib-devel libgcrypt-devel bison patchelf"
             PKGLIST+=" socat numactl"
             if [[ "${RHEL}" -eq 7 ]]; then
-                PKGLIST+=" numactl-libs perl-Digest-MD5  python3-pip python3-setuptools python3-wheel"
+                PKGLIST+=" numactl-libs perl-Digest-MD5  python3-pip python3-setuptools python3-wheel rh-python36-python-sphinx"
             elif [[ "${RHEL}" -eq 6 ]]; then
                 PKGLIST+=" rh-python36-python-pip rh-python36-docutils rh-python36-python-setuptools"
             fi
@@ -259,9 +266,9 @@ install_deps() {
                 echo "waiting"
                 sleep 1
             done
-            # Workaround for Centos > 7 Sphinx
             if [[ "${RHEL}" -eq 7 ]]; then
-                /usr/bin/pip3 install sphinx
+                yum -y --enablerepo=centos-sclo-rh-testing install devtoolset-10-gcc-c++ devtoolset-10-binutils devtoolset-10-valgrind devtoolset-10-valgrind-devel devtoolset-10-libatomic-devel
+                yum -y --enablerepo=centos-sclo-rh-testing install devtoolset-10-libasan-devel devtoolset-10-libubsan-devel
             elif [[ "${RHEL}" -eq 6 ]]; then
                 source /opt/rh/rh-python36/enable
                 pip install sphinx
@@ -449,7 +456,7 @@ build_source_deb(){
 
     TARFILE=$(basename $(find . -name 'percona-xtrabackup-*.tar.gz' | sort | tail -n1))
     NAME=$(echo ${TARFILE}| awk -F '-' '{print $1"-"$2}')
-    VERSION=$(echo ${TARFILE%.tar.gz} | awk -F '-' '{print $3}')
+    VERSION=$(echo ${TARFILE%.tar.gz} | awk -F '-' '{print $3"-"$4}')
     SHORTVER=$(echo ${VERSION} | awk -F '.' '{print $1"."$2}')
 
     echo "DEB_RELEASE=${DEB_RELEASE}" >> ${CURDIR}/percona-xtrabackup-8.0.properties
@@ -498,8 +505,8 @@ build_deb(){
 
 
     DSC=$(basename $(find . -name '*.dsc' | sort | tail -n 1))
-    DIRNAME=$(echo $DSC | sed -e 's:_:-:g' | awk -F'-' '{print $1"-"$2"-"$3"-"$4}')
-    VERSION=$(echo $DSC | sed -e 's:_:-:g' | awk -F'-' '{print $4}')
+    DIRNAME=$(echo $DSC | sed -e 's:_:-:g' | awk -F'-' '{print $1"-"$2"-"$3"-"$4"-"$5}')
+    VERSION=$(echo $DSC | sed -e 's:_:-:g' | awk -F'-' '{print $4"-"$5}')
     #
     echo "DEB_RELEASE=${DEB_RELEASE}" >> ${CURDIR}/percona-xtrabackup-8.0.properties
     echo "DEBIAN_VERSION=${OS_NAME}" >> ${CURDIR}/percona-xtrabackup-8.0.properties
@@ -528,11 +535,11 @@ build_tarball(){
     TARFILE=$(basename $(find . -name 'percona-xtrabackup-*.tar.gz' | sort | tail -n1))
     enable_venv
     #
-    NAME=$(echo ${TARFILE}| awk -F '-' '{print $1"-"$2}')
-    VERSION=$(echo ${TARFILE}| awk -F '-' '{print $3}')
+    NAME=$(echo ${TARFILE%.tar.gz}| awk -F '-' '{print $1"-"$2}')
+    VERSION=$(echo ${TARFILE%.tar.gz}| awk -F '-' '{print $3"-"$4}')
     #
     SHORTVER=$(echo ${VERSION} | awk -F '.' '{print $1"."$2}')
-    TMPREL=$(echo ${TARFILE}| awk -F '-' '{print $4}')
+    TMPREL=$(echo ${TARFILE%.tar.gz}| awk -F '-' '{print $5}')
     RELEASE=${TMPREL%.tar.gz}
 
     rm -fr TARGET && mkdir TARGET
