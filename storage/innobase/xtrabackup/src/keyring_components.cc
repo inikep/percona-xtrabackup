@@ -15,38 +15,30 @@ along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
 
 *******************************************************/
-#include <components/keyrings/common/data_file/reader.h>
-#include <components/keyrings/common/data_file/writer.h>
-#include <components/keyrings/common/json_data/json_reader.h>
-#include <components/keyrings/common/json_data/json_writer.h>
-
-#include <components/keyrings/keyring_file/config/config.h>
 #include <dict0dict.h>
 #include <mysqld.h>
+#include <rapidjson/istreamwrapper.h>
 #include <sql/server_component/mysql_server_keyring_lockable_imp.h>
 #include <sql/sql_component.h>
 #include "backup_copy.h"
 #include "backup_mysql.h"
 #include "common.h"
+#include "my_rapidjson_size_t.h"
+#include "rapidjson/document.h"
 #include "utils.h"
 #include "xtrabackup.h"
-
-using keyring_common::data_file::File_reader;
-using keyring_common::data_file::File_writer;
 
 namespace xtrabackup {
 namespace components {
 
-const char *XTRABACKUP_KEYRING_FILE_CONFIG =
-    "xtrabackup_component_keyring_file.cnf";
-
-std::unique_ptr<keyring_file::config::Config_pod> new_config_pod;
+const char *XTRABACKUP_KEYRING_FILE_CONFIG = "xtrabackup_component_keyring_file.cnf";
 
 SERVICE_TYPE(registry) *reg_srv = nullptr;
 SERVICE_TYPE(keyring_reader_with_status) *keyring_reader_service = nullptr;
 bool service_handler_initialized = false;
 bool keyring_component_initialized = false;
-std::string component_config_data;
+std::string component_name;
+std::string component_config_path;
 
 bool inititialize_service_handles() {
   DBUG_TRACE;
@@ -95,60 +87,70 @@ static bool initialize_manifest_file_components(std::string components) {
   return false;
 }
 
-bool write_component_config_file() {
-  return backup_file_print(XTRABACKUP_KEYRING_FILE_CONFIG,
-                           component_config_data.c_str(),
-                           component_config_data.length());
-}
+/** Check if component file exist on plugin dir or datadir setting
+component_config_path to config file path.
+@return true in case of file found. */
+bool check_component_config_file() {
+  os_file_type_t type;
+  bool exists = false;
+  std::string config_name = component_name + ".cnf";
+  component_config_path = server_plugin_dir;
+  component_config_path += OS_PATH_SEPARATOR + config_name;
+  os_file_status(component_config_path.c_str(), &exists, &type);
+  if (exists) {
+    /* we need to read the file to validate if it is instructing to read local
+     * configuration file inside datadir */
+    rapidjson::Document data_;
+    std::ifstream file_stream(component_config_path);
+    if (!file_stream.is_open()) return false;
 
-void create_component_config_data() {
-  rapidjson::Document json;
-  json.SetObject();
-  rapidjson::Document::AllocatorType &allocator = json.GetAllocator();
-  rapidjson::Value config_value(rapidjson::kObjectType);
-  config_value.SetString(new_config_pod->config_file_path_.c_str(),
-                         static_cast<rapidjson::SizeType>(
-                             new_config_pod->config_file_path_.length()),
-                         allocator);
-  json.AddMember("path", config_value, allocator);
-  json.AddMember("read_only", new_config_pod->read_only_, allocator);
-  rapidjson::StringBuffer string_buffer;
-  string_buffer.Clear();
-  rapidjson::Writer<rapidjson::StringBuffer> string_writer(string_buffer);
-  json.Accept(string_writer);
-  component_config_data =
-      std::string(string_buffer.GetString(), string_buffer.GetSize());
-}
+    rapidjson::IStreamWrapper json_fstream_reader(file_stream);
+    data_.ParseStream(json_fstream_reader);
+    if (data_.HasParseError()) {
+      xb::error() << "error parsing json file " << component_config_path;
+    }
+    if (!data_.HasMember("read_local_config") ||
+        (data_.HasMember("read_local_config") &&
+         data_["read_local_config"].Get<bool>() == false)) {
+      return true;
+    }
+  }
 
+  component_config_path = mysql_real_data_home;
+  component_config_path += OS_PATH_SEPARATOR + config_name;
+  os_file_status(component_config_path.c_str(), &exists, &type);
+  if (exists) return true;
+
+  return false;
+}
 
 bool keyring_init_online(MYSQL *connection) {
   bool init_components = false;
   std::string component_urn = "file://";
-  std::string component_name;
-  new_config_pod = std::make_unique<keyring_file::config::Config_pod>();
   const char *query =
-      "SELECT * FROM performance_schema.keyring_component_status";
+      "SELECT lower(STATUS_KEY), STATUS_VALUE FROM "
+      "performance_schema.keyring_component_status";
 
   MYSQL_RES *mysql_result;
   MYSQL_ROW row;
 
   mysql_result = xb_mysql_query(connection, query, true);
-
-  while ((row = mysql_fetch_row(mysql_result)) != NULL) {
-    init_components = true;
-    if (strcmp(row[0], "Component_name") == 0) {
+  if (mysql_num_rows(mysql_result) > 0) {
+    /* First row has component Name */
+    row = mysql_fetch_row(mysql_result);
+    if (strcmp(row[0], "component_name") == 0) {
+      init_components = true;
       component_name = row[1];
       component_urn += row[1];
-    } else if (strcmp(row[0], "Data_file") == 0)
-      new_config_pod->config_file_path_ = row[1];
-    else if (strcmp(row[0], "Read_only") == 0)
-      new_config_pod->read_only_ = (strcmp(row[1], "No") == 0) ? false : true;
+      if (!check_component_config_file()) {
+        xb::error() << "Error reading " << component_name << " config file";
+      }
+    }
   }
 
   mysql_free_result(mysql_result);
 
   if (init_components) {
-    create_component_config_data();
     if (initialize_manifest_file_components(component_urn)) return false;
     /*
       If keyring component was loaded through manifest file, services provided
@@ -189,53 +191,6 @@ bool keyring_init_offline() {
     }
   }
 
-  std::string config;
-  File_reader component_config(fname, false, config);
-  std::string component_name = "file://component_keyring_file";
-  if (!component_config.valid()) {
-    if (opt_component_keyring_file_config != nullptr) {
-      msg("xtrabackup: Error: Component configuration file is not readable or "
-          "not found.\n");
-      return false;
-    }
-    /* XTRABACKUP_KEYRING_FILE_CONFIG not found. Attempt to init plugin. */
-    return true;
-  }
-  if (config.length() == 0) {
-    msg("xtrabackup: Error: Component configuration file is empty.\n");
-    return false;
-  }
-
-  rapidjson::Document config_json;
-  config_json.Parse(config);
-  if (config_json.HasParseError()) {
-    msg("xtrabackup: Error: Component configuration file is not a valid "
-        "JSON.\n");
-    return false;
-  }
-  if (!config_json.HasMember("path")) {
-    msg("xtrabackup: Error: Component configuration does not have path "
-        "member.\n");
-    return false;
-  }
-
-  std::string path;
-  if (opt_keyring_file_data != nullptr) {
-    path = opt_keyring_file_data;
-  } else {
-    path = config_json["path"].GetString();
-  }
-
-  bool read_only;
-  if (config_json.HasMember("read_only") && config_json["read_only"].IsBool()) {
-    read_only = config_json["read_only"].GetBool();
-  } else {
-    read_only = false;
-  }
-
-  new_config_pod = std::make_unique<keyring_file::config::Config_pod>();
-  new_config_pod->config_file_path_ = path;
-  new_config_pod->read_only_ = read_only;
   if (initialize_manifest_file_components(component_name)) return false;
   set_srv_keyring_implementation_as_default();
   keyring_component_initialized = true;

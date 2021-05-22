@@ -1698,11 +1698,6 @@ bool backup_finish(Backup_context &context) {
   if (!mysql_slave_position.empty() && opt_slave_info) {
     msg("MySQL slave binlog position: %s\n", mysql_slave_position.c_str());
   }
-  if (xtrabackup::components::keyring_component_initialized &&
-      !xtrabackup::components::write_component_config_file()) {
-    msg("xtrabackup: write_component_config_file failed\n");
-    return (false);
-  }
   if (!write_backup_config_file()) {
     return (false);
   }

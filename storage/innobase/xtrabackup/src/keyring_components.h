@@ -27,13 +27,6 @@ extern std::unique_ptr<keyring_file::config::Config_pod> new_config_pod;
 extern bool keyring_component_initialized;
 
 /**
-  Write backup keyring component config file
-
-  @return false in case of error, true otherwise
-*/
-bool write_component_config_file();
-
-/**
   Initialize Keyring component by querying config from a running server
   This is used at --backup
 

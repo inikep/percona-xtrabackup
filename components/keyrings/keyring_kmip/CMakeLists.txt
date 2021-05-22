@@ -1,4 +1,4 @@
-# Copyright (c) 2021, 2023, Oracle and/or its affiliates.
+# Copyright (c) 2021, Percona and/or its affiliates.
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License, version 2.0,
@@ -20,16 +20,16 @@
 # along with this program; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA
 
-IF (NOT DEFINED WITH_COMPONENT_KEYRING_FILE AND
-    NOT DEFINED WITHOUT_COMPONENT_KEYRING_FILE)
-  SET(WITH_COMPONENT_KEYRING_FILE 1)
+IF (NOT DEFINED WITH_COMPONENT_KEYRING_KMIP AND
+    NOT DEFINED WITHOUT_COMPONENT_KEYRING_KMIP)
+  SET(WITH_COMPONENT_KEYRING_KMIP 1)
 ENDIF()
 
-IF(NOT WITH_COMPONENT_KEYRING_FILE)
+IF(NOT WITH_COMPONENT_KEYRING_KMIP)
   RETURN()
 ENDIF()
 
-ADD_DEFINITIONS(-DLOG_COMPONENT_TAG="component_keyring_file")
+ADD_DEFINITIONS(-DLOG_COMPONENT_TAG="component_keyring_kmip")
 
 INCLUDE_DIRECTORIES(
   ${CMAKE_CURRENT_SOURCE_DIR}
@@ -37,8 +37,13 @@ INCLUDE_DIRECTORIES(
   ${BOOST_INCLUDE_DIR}
 )
 
+SET(KEYRING_KMIP_SOURCE
+  # Component handling
+  keyring_kmip.cc
 
-SET(KEYRING_FILE_SOURCE
+  # Config handling
+  config/config.cc
+
   # Encryption handling
   service_implementation/keyring_encryption_service_definition.cc
 
@@ -63,35 +68,23 @@ SET(KEYRING_FILE_SOURCE
   # Backend handling
   backend/backend.cc
 
-  # Config handling
-  config/config.cc
-
-  # Keyring file component handling
-  keyring_file.cc
-
   # Component callbacks
   component_callbacks.cc
 )
 
-# MacOS linker cannot find reference to xtrabackup::components::new_config_pod
-SET(XTRABACKUP_UNDEFINED_SYMBOLS "")
-IF(APPLE)
-  SET(XTRABACKUP_UNDEFINED_SYMBOLS "-undefined dynamic_lookup")
-ENDIF()
-
-SET(KEYRING_FILE_LIBRARIES
+SET(KEYRING_KMIP_LIBRARIES
   keyring_common
   ${SSL_LIBRARIES}
-  ${XTRABACKUP_UNDEFINED_SYMBOLS}
+  kmippp
 )
 
-MYSQL_ADD_COMPONENT(keyring_file
-  ${KEYRING_FILE_SOURCE}
-  LINK_LIBRARIES ${KEYRING_FILE_LIBRARIES}
+MYSQL_ADD_COMPONENT(keyring_kmip
+  ${KEYRING_KMIP_SOURCE}
+  LINK_LIBRARIES ${KEYRING_KMIP_LIBRARIES}
   MODULE_ONLY
 )
 IF(APPLE)
-  SET_TARGET_PROPERTIES(component_keyring_file PROPERTIES
+  SET_TARGET_PROPERTIES(component_keyring_kmip PROPERTIES
     LINK_FLAGS "-undefined dynamic_lookup")
 ENDIF()
 

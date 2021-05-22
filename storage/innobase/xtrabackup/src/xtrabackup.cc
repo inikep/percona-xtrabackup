@@ -328,6 +328,7 @@ static char *internal_innobase_data_file_path = NULL;
 
 char *opt_transition_key = NULL;
 char *opt_xtra_plugin_dir = NULL;
+char *server_plugin_dir = NULL;
 char *opt_xtra_plugin_load = NULL;
 char *opt_keyring_file_data = nullptr;
 char *opt_component_keyring_file_config = nullptr;
