@@ -26,10 +26,10 @@ SET(KEYRING_COMMON_SOURCES
   # Component implementation helpers
   component_helpers/src/keyring_log_builtins_definition.cc
   # Config file reader
-  config/config_reader.cc
   # Data representation
   data/data.cc
   data/meta.cc
+  data/psi_memory_resource.cpp
   # File reader/writer
   data_file/reader.cc
   data_file/writer.cc
@@ -50,6 +50,10 @@ IF(COMPONENT_COMPILE_VISIBILITY)
   SET(COMPILE_OPTIONS_ARG COMPILE_OPTIONS "${COMPONENT_COMPILE_VISIBILITY}")
 ENDIF()
 
+INCLUDE_DIRECTORIES(SYSTEM
+        ${BOOST_PATCHES_DIR}
+        ${BOOST_INCLUDE_DIR})
+
 ADD_CONVENIENCE_LIBRARY(
   keyring_common
   ${KEYRING_COMMON_SOURCES}
@@ -61,3 +65,5 @@ ADD_CONVENIENCE_LIBRARY(
     $<TARGET_PROPERTY:extra::rapidjson,INTERFACE_COMPILE_DEFINITIONS>
   LINK_LIBRARIES library_mysys extra::rapidjson
 )
+TARGET_COMPILE_OPTIONS(keyring_common PUBLIC "-Wno-cast-qual")
+
