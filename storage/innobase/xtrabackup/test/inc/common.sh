@@ -535,6 +535,11 @@ loose-group_replication_recovery_use_ssl=ON
 loose-group_replication_recovery_get_public_key=ON
 loose-group_replication_local_address=\"127.0.0.1:${SRV_MYSQLD_GR_PORT[$i]}\"
 loose-group_replication_group_seeds= \"${GR_CLUSTER_ADDRESS%?}\""
+    if [ "$MYSQL_DEBUG_MODE" = "on" ]; then
+      MYSQLD_EXTRA_MY_CNF_OPTS="
+${MYSQLD_EXTRA_MY_CNF_OPTS}
+plugin_dir=${MYSQL_BASEDIR}/lib/plugin/debug"
+    fi
     start_server_with_id ${i} 'gr' $*
 
     # config GR User
