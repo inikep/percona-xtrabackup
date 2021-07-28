@@ -110,6 +110,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "read_filt.h"
 #include "redo_log.h"
 #include "space_map.h"
+#include "utils.h"
 #include "write_filt.h"
 #include "wsrep.h"
 #include "xb0xb.h"
@@ -6534,6 +6535,8 @@ skip_check:
     goto error_cleanup;
   }
 
+  if (!xtrabackup::utils::read_server_uuid()) goto error_cleanup;
+
   if (opt_transition_key) {
     if (!xb_tablespace_keys_load(xtrabackup_incremental, opt_transition_key,
                                  strlen(opt_transition_key))) {
@@ -6542,8 +6545,8 @@ skip_check:
       goto error_cleanup;
     }
   } else {
-    if(!xtrabackup::components::keyring_init_offline())
-    {
+    /* Initialize keyrings */
+    if (!xtrabackup::components::keyring_init_offline()) {
       msg("xtrabackup: Error: failed to init keyring component\n");
       goto error_cleanup;
     }

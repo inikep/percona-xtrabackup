@@ -24,6 +24,9 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA
 #include <my_getopt.h>
 #include "datasink.h"
 #include "mysql.h"
+#include "log0types.h"
+#include "os0file.h"
+#include "ut0mutex.h"
 #include "xb_regex.h"
 #include "xbstream.h"
 #include "xtrabackup_config.h"
