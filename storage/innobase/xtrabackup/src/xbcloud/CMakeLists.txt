@@ -45,6 +45,7 @@ MYSQL_ADD_EXECUTABLE(xbcloud
   xbcloud.cc
   ../xbstream_read.cc
   http.cc
+  azure.cc
   s3.cc
   ../xbcrypt_common.cc
   swift.cc)
