@@ -46,6 +46,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include <mysql_version.h>
 #include <mysqld.h>
 #include <sql_bitmap.h>
+#include "row0quiesce.h"
 
 #include <fcntl.h>
 #include <signal.h>
@@ -196,6 +197,8 @@ static hash_table_t *tables_exclude_hash = NULL;
 
 /* map of schema name and schema id */
 static std::map<std::string, uint64> dd_schema_map;
+
+static uint32_t cfg_version = IB_EXPORT_CFG_VERSION_V6;
 
 /* map of <schema id, name> and SDI id*/
 static std::map<std::pair<int, std::string>, uint64> dd_table_map;
@@ -2546,6 +2549,48 @@ static bool innodb_end(void) {
   internal_innobase_data_file_path = NULL;
 
   return (false);
+}
+
+/* Read backup meta info.
+@param[in] filename filename to read mysql version
+@return true on success, false on failure. */
+static bool xtrabackup_read_info(char *filename) {
+  FILE *fp;
+  bool r = true;
+  char mysql_server_version_str[30] = ""; /* 8.0.20.debug| 8.0.20 */
+  unsigned long mysql_server_version;
+
+  fp = fopen(filename, "r");
+  if (!fp) {
+    msg("xtrabackup: Error: cannot open %s\n", filename);
+    return (false);
+  }
+  /* skip uuid, name, tool_name, tool_command, tool_version, ibbackup_version */
+  for (int i = 0; i < 6; i++) {
+    char c;
+    do {
+      c = fgetc(fp);
+    } while (c != '\n');
+  }
+
+  if (fscanf(fp, "server_version = %29s\n", mysql_server_version_str) != 1) {
+    r = false;
+    goto end;
+  }
+  mysql_server_version =
+      xtrabackup::utils::get_version_number(mysql_server_version_str);
+
+  ut_ad(mysql_server_version > 80000 && mysql_server_version < 90000);
+  if (mysql_server_version < 80019) {
+    cfg_version = IB_EXPORT_CFG_VERSION_V3;
+  } else if (mysql_server_version < 80020) {
+    cfg_version = IB_EXPORT_CFG_VERSION_V4;
+  } else if (mysql_server_version < 80023) {
+    cfg_version = IB_EXPORT_CFG_VERSION_V5;
+  }
+end:
+  fclose(fp);
+  return (r);
 }
 
 /* ================= common ================= */
@@ -5981,7 +6026,10 @@ static bool xb_export_cfg_write_index_fields(
                                this index */
     FILE *file)                /*!< in: file to write to */
 {
-  byte row[sizeof(ib_uint32_t) * 2];
+  /* This row will store prefix_len, fixed_len,
+  and in IB_EXPORT_CFG_VERSION_V4, is_ascending */
+  byte row[sizeof(uint32_t) * 3];
+  size_t row_len = sizeof(row);
 
   for (ulint i = 0; i < index->n_fields; ++i) {
     byte *ptr = row;
@@ -5992,7 +6040,16 @@ static bool xb_export_cfg_write_index_fields(
 
     mach_write_to_4(ptr, field->fixed_len);
 
-    if (fwrite(row, 1, sizeof(row), file) != sizeof(row)) {
+    if (cfg_version >= IB_EXPORT_CFG_VERSION_V4)
+    {
+      ptr += sizeof(uint32_t);
+      /* In IB_EXPORT_CFG_VERSION_V4 we also write the is_ascending boolean. */
+      mach_write_to_4(ptr, field->is_ascending);
+    } else {
+      row_len = sizeof(uint32_t) * 2;
+    }
+
+    if (fwrite(row, 1, row_len, file) != row_len) {
       msg("xtrabackup: Error: writing index fields.");
 
       return (false);
@@ -6115,13 +6172,12 @@ static bool xb_export_cfg_write_index_fields(
   if (has_sdi) {
     dict_index_t *index = dict_sdi_get_index(table->space);
 
-    ut_ad(index != NULL);
+    ut_ad(index != nullptr);
     ret = xb_export_cfg_write_one_index(index, file);
   }
 
   /* Write the index meta data. */
-  for (const dict_index_t *index = UT_LIST_GET_FIRST(table->indexes);
-       index != 0 && ret; index = UT_LIST_GET_NEXT(indexes, index)) {
+  for (const dict_index_t *index : table->indexes) {
     ret = xb_export_cfg_write_one_index(index, file);
   }
 
@@ -6192,6 +6248,12 @@ static bool xb_export_cfg_write_index_fields(
 
       return (false);
     }
+
+    if (cfg_version >= IB_EXPORT_CFG_VERSION_V3) {
+      if (row_quiesce_write_default_value(col, file) != DB_SUCCESS) {
+        return (false);
+      }
+    }
   }
 
   return (true);
@@ -6209,7 +6271,7 @@ static bool xb_export_cfg_write_index_fields(
   byte value[sizeof(uint32_t)];
 
   /* Write the meta-data version number. */
-  mach_write_to_4(value, IB_EXPORT_CFG_VERSION_V2);
+  mach_write_to_4(value, cfg_version);
 
   if (fwrite(&value, 1, sizeof(value), file) != sizeof(value)) {
     msg("xtrabackup: Error: writing meta-data version number.");
@@ -6276,6 +6338,17 @@ static bool xb_export_cfg_write_index_fields(
     return (false);
   }
 
+  if (cfg_version >= IB_EXPORT_CFG_VERSION_V5) {
+    /* write number of nullable column before first instant column */
+    mach_write_to_4(value, table->first_index()->n_instant_nullable);
+
+    if (fwrite(&value, 1, sizeof(value), file) != sizeof(value)) {
+      msg("xtrabackup: Error: writing table meta-data.");
+
+      return (false);
+    }
+  }
+
   /* Write the space flags */
   ulint space_flags = fil_space_get_flags(table->space);
   ut_ad(space_flags != ULINT_UNDEFINED);
@@ -6284,6 +6357,19 @@ static bool xb_export_cfg_write_index_fields(
   if (fwrite(&value, 1, sizeof(value), file) != sizeof(value)) {
     msg("xtrabackup: Error: writing writing space_flags.");
     return (false);
+  }
+
+  if (cfg_version >= IB_EXPORT_CFG_VERSION_V6) {
+    /* Write compression type info. */
+    uint8_t compression_type =
+        static_cast<uint8_t>(fil_get_compression(table->space));
+    mach_write_to_1(value, compression_type);
+
+    if (fwrite(&value, 1, sizeof(uint8_t), file) != sizeof(uint8_t)) {
+      msg("xtrabackup: Error: writing compression type info.");
+
+      return (false);
+    }
   }
 
   return (true);
@@ -6518,6 +6604,7 @@ static void xtrabackup_prepare_func(int argc, char **argv) {
   fil_node_t *node;
   fil_space_t *space;
   char metadata_path[FN_REFLEN];
+  char xtrabackup_info_path[FN_REFLEN];
   IORequest write_request(IORequest::WRITE);
 
   /* cd to target-dir */
@@ -6544,6 +6631,20 @@ static void xtrabackup_prepare_func(int argc, char **argv) {
         metadata_path);
     exit(EXIT_FAILURE);
   }
+
+  sprintf(metadata_path, "%s/%s", xtrabackup_target_dir,
+          XTRABACKUP_METADATA_FILENAME);
+
+  /* read xtrabackup_info file only in the case of export since we need the
+   * server version */
+  sprintf(xtrabackup_info_path, "%s/%s", xtrabackup_target_dir,
+          XTRABACKUP_INFO);
+  if (xtrabackup_export && !xtrabackup_read_info(xtrabackup_info_path)) {
+    msg("xtrabackup: Error: failed to read xtrabackup_info from '%s'\n",
+        xtrabackup_info_path);
+    exit(EXIT_FAILURE);
+  }
+
 
   if (!strcmp(metadata_type_str, "full-backuped")) {
     msg("xtrabackup: This target seems to be not prepared yet.\n");
