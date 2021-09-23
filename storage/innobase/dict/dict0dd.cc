@@ -870,6 +870,11 @@ dict_table_t *dd_table_create_on_dd_obj(const dd::Table *dd_table,
   /* Add system columns to make adding index work */
   dict_table_add_system_columns(table, heap);
 
+  /* add instant column default value */
+  if (table->has_instant_cols() || table->has_row_versions()) {
+    dd_fill_instant_columns_default(*dd_table, table);
+  }
+
   /* It appears that index list for InnoDB table always starts with
   primary key */
   ut_ad(dd_table->indexes().size() > 0);
@@ -4135,8 +4140,12 @@ inline bool dd_table_contains_fulltext(const dd::Table &table) {
 /** Read the metadata of default values for all columns added instantly
 @param[in]      dd_table        dd::Table
 @param[in,out]  table           InnoDB table object */
-static void dd_fill_instant_columns_default(const dd::Table &dd_table,
-                                            dict_table_t *table) {
+#ifndef XTRABACKUP
+static
+#endif /*XTRABACKUP */
+    void
+    dd_fill_instant_columns_default(const dd::Table &dd_table,
+                                    dict_table_t *table) {
   ut_ad(table->has_instant_cols() || table->has_row_versions());
   ut_ad(dd_table_has_instant_cols(dd_table));
 
@@ -6293,13 +6302,14 @@ void dd_process_schema_rec(mem_heap_t *heap, const rec_t *rec,
   ulint *offsets = rec_get_offsets(rec, dd_tables->first_index(), nullptr,
                                    ULINT_UNDEFINED, &heap);
 
-  field = (const byte *)rec_get_nth_field(rec, offsets,
+  field = (const byte *)rec_get_nth_field(nullptr, rec, offsets,
                                           dd_tables->field_number("id"), &len);
 
   *id = mach_read_from_8(field);
 
-  field = rec_get_nth_field(
-      rec, offsets, dd_tables->field_number("name") + DD_FIELD_OFFSET, &len);
+  field = rec_get_nth_field(nullptr, rec, offsets,
+                            dd_tables->field_number("name") + DD_FIELD_OFFSET,
+                            &len);
   auto name_csr = (const char *)field;
 
   name->assign(name_csr, name_csr + len);
@@ -6326,18 +6336,19 @@ void dd_process_dd_tables_rec(mem_heap_t *heap, const rec_t *rec,
   ulint *offsets = rec_get_offsets(rec, dd_tables->first_index(), nullptr,
                                    ULINT_UNDEFINED, &heap);
 
-  field = rec_get_nth_field(
-      rec, offsets, dd_tables->field_number("name") + DD_FIELD_OFFSET, &len);
+  field = rec_get_nth_field(nullptr, rec, offsets,
+                            dd_tables->field_number("name") + DD_FIELD_OFFSET,
+                            &len);
   auto name_csr = (const char *)field;
   name->assign(name_csr, name_csr + len);
 
-  field = (const byte *)rec_get_nth_field(rec, offsets,
+  field = (const byte *)rec_get_nth_field(nullptr, rec, offsets,
                                           dd_tables->field_number("id"), &len);
   *id = mach_read_from_8(field);
 
   field = (const byte *)rec_get_nth_field(
-      rec, offsets, dd_tables->field_number("schema_id") + DD_FIELD_OFFSET,
-      &len);
+      nullptr, rec, offsets,
+      dd_tables->field_number("schema_id") + DD_FIELD_OFFSET, &len);
   *schema_id = mach_read_from_8(field);
   mtr_commit(mtr);
 }
@@ -6364,9 +6375,9 @@ const char *dd_process_dd_tables_rec_and_mtr_commit(
   ulint *offsets = rec_get_offsets(rec, dd_tables->first_index(), nullptr,
                                    ULINT_UNDEFINED, &heap);
 
-  field = rec_get_nth_field(
-      nullptr, rec, offsets,
-      dd_object_table.field_number("FIELD_ENGINE") + DD_FIELD_OFFSET, &len);
+  field = rec_get_nth_field(nullptr, rec, offsets,
+                            dd_tables->field_number("engine") + DD_FIELD_OFFSET,
+                            &len);
 
   /* If "engine" field is not "innodb", return. */
   if (strncmp((const char *)field, "InnoDB", 6) != 0) {
@@ -6432,7 +6443,7 @@ const char *dd_process_dd_partitions_rec_and_mtr_commit(
   ulint *offsets = rec_get_offsets(rec, dd_tables->first_index(), nullptr,
                                    ULINT_UNDEFINED, &heap);
 
-  /* Get the engine   /* . */
+  /* Get the engine field. */
   field = rec_get_nth_field(nullptr, rec, offsets,
                             dd_tables->field_number("engine") + DD_FIELD_OFFSET,
                             &len);
