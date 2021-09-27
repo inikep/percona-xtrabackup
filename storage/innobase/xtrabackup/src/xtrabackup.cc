@@ -440,6 +440,8 @@ uint opt_dump_innodb_buffer_pool_timeout = 10;
 uint opt_dump_innodb_buffer_pool_pct = 0;
 bool opt_dump_innodb_buffer_pool = false;
 
+bool punch_hole_supported = false;
+
 bool opt_lock_ddl = false;
 bool opt_lock_ddl_per_table = false;
 uint opt_lock_ddl_timeout = 0;
@@ -3237,6 +3239,7 @@ static void xtrabackup_init_datasinks(void) {
     /* Local filesystem */
     ds_data = ds_meta = ds_redo =
         ds_create(xtrabackup_target_dir, DS_TYPE_LOCAL);
+    punch_hole_supported = ds_data->fs_support_punch_hole;
   }
 
   /* Track it for destruction */
