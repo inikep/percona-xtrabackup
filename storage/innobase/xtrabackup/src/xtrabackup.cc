@@ -144,7 +144,6 @@ const char reserved_system_space_name[] = "innodb_system";
 /* This tablespace name is reserved by InnoDB for the predefined temporary
 tablespace. */
 const char reserved_temporary_space_name[] = "innodb_temporary";
-ulong opt_ssl_fips_mode = SSL_FIPS_MODE_OFF;
 
 /* === xtrabackup specific options === */
 char xtrabackup_real_target_dir[FN_REFLEN] = "./xtrabackup_backupfiles/";
@@ -487,6 +486,7 @@ std::vector<ulint> invalid_encrypted_tablespace_ids;
 extern TYPELIB innodb_flush_method_typelib;
 
 #include "caching_sha2_passwordopt-vars.h"
+#include "sslopt-vars.h"
 
 bool mdl_taken = FALSE;
 extern struct rand_struct sql_rand;
@@ -1253,6 +1253,7 @@ struct my_option xb_client_options[] = {
      0},
 
 #include "caching_sha2_passwordopt-longopts.h"
+#include "sslopt-longopts.h"
 
 #if !defined(HAVE_YASSL)
     {"server-public-key-path", OPT_SERVER_PUBLIC_KEY,
@@ -1846,6 +1847,9 @@ bool xb_get_one_option(int optid, const struct my_option *opt, char *argument) {
     case OPT_XTRA_ENCRYPT_KEY:
       hide_option(argument, &xtrabackup_encrypt_key);
       break;
+
+#include "sslopt-case.h"
+
     case '?':
       usage();
       exit(EXIT_SUCCESS);
