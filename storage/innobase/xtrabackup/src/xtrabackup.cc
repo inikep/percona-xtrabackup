@@ -1251,6 +1251,7 @@ struct my_option xb_client_options[] = {
      0},
 
 #include "caching_sha2_passwordopt-longopts.h"
+#include "sslopt-longopts.h"
 
 #if !defined(HAVE_YASSL)
     {"server-public-key-path", OPT_SERVER_PUBLIC_KEY,
@@ -1840,6 +1841,9 @@ bool xb_get_one_option(int optid, const struct my_option *opt, char *argument) {
     case OPT_XTRA_ENCRYPT_KEY:
       hide_option(argument, &xtrabackup_encrypt_key);
       break;
+
+#include "sslopt-case.h"
+
     case '?':
       usage();
       exit(EXIT_SUCCESS);
