@@ -172,7 +172,6 @@ lsn_t incremental_start_checkpoint_lsn;
 lsn_t incremental_to_lsn;
 lsn_t incremental_last_lsn;
 lsn_t incremental_flushed_lsn;
-lsn_t page_tracking_start_lsn = 0;
 
 pagetracking::xb_space_map *changed_page_tracking = nullptr;
 
@@ -4199,6 +4198,7 @@ void xtrabackup_backup_func(void) {
 
   debug_sync_point("xtrabackup_suspend_at_start");
 
+  lsn_t page_tracking_start_lsn = 0;
   if (opt_page_tracking &&
       pagetracking::start(mysql_connection, &page_tracking_start_lsn)) {
     msg("xtrabackup: pagetracking is started on the server with LSN " LSN_PF
