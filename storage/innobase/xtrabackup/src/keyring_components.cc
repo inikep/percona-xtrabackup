@@ -33,6 +33,8 @@ namespace components {
 
 const char *XTRABACKUP_KEYRING_FILE_CONFIG = "xtrabackup_component_keyring_file.cnf";
 
+const char *XTRABACKUP_KEYRING_KMIP_CONFIG = "xtrabackup_component_keyring_kmip.cnf";
+
 SERVICE_TYPE(registry) *reg_srv = nullptr;
 SERVICE_TYPE(keyring_reader_with_status) *keyring_reader_service = nullptr;
 bool service_handler_initialized = false;
@@ -163,32 +165,47 @@ bool keyring_init_online(MYSQL *connection) {
   return true;
 }
 
-bool keyring_init_offline() {
-  if (!xtrabackup::utils::read_server_uuid()) return (false);
-
-  char fname[FN_REFLEN];
+bool set_component_config_path(const char *component_config, char *fname) {
   if (opt_component_keyring_file_config != nullptr) {
     strncpy(fname, opt_component_keyring_file_config, FN_REFLEN);
   } else if (xtrabackup_stats) {
-    if (fn_format(fname, XTRABACKUP_KEYRING_FILE_CONFIG, mysql_real_data_home,
-                  "", MY_UNPACK_FILENAME | MY_SAFE_PATH) == NULL) {
+    if (fn_format(fname, component_config, mysql_real_data_home, "",
+                  MY_UNPACK_FILENAME | MY_SAFE_PATH) == NULL) {
       return (false);
     }
 
   } else {
     if (xtrabackup_incremental_dir != nullptr) {
-      if (fn_format(fname, XTRABACKUP_KEYRING_FILE_CONFIG,
-                    xtrabackup_incremental_dir, "",
+      if (fn_format(fname, component_config, xtrabackup_incremental_dir, "",
                     MY_UNPACK_FILENAME | MY_SAFE_PATH) == NULL) {
         return (false);
       }
     } else {
-      if (fn_format(fname, XTRABACKUP_KEYRING_FILE_CONFIG,
-                    xtrabackup_real_target_dir, "",
+      if (fn_format(fname, component_config, xtrabackup_real_target_dir, "",
                     MY_UNPACK_FILENAME | MY_SAFE_PATH) == NULL) {
         return (false);
       }
     }
+  }
+  return (true);
+}
+
+bool keyring_init_offline() {
+  if (!xtrabackup::utils::read_server_uuid()) return (false);
+
+  char fname[FN_REFLEN];
+  std::string config;
+  std::string component_name;
+  /* keyring file */
+  set_component_config_path(XTRABACKUP_KEYRING_FILE_CONFIG, fname);
+
+  if (xtrabackup_stats) {
+    msg_ts("xtrabackup: Encryption is not supported with --stats");
+    return false;
+  }
+  if (config.length() == 0) {
+    msg("xtrabackup: Error: Component configuration file is empty.\n");
+    return false;
   }
 
   if (initialize_manifest_file_components(component_name)) return false;
