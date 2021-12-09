@@ -450,7 +450,9 @@ static bool datafile_copy_backup(const char *filepath, uint thread_n) {
                             "sdi",
                             "mysqld.my",
                             "mysqld-debug.my",
-                            "component_keyring_file.cnf", NULL};
+                            "component_keyring_file.cnf",
+                            "component_keyring_kmip.cnf",
+                            NULL};
 
   /* Get the name and the path for the tablespace. node->name always
   contains the path (which may be absolute for remote tablespaces in
@@ -1882,6 +1884,7 @@ bool copy_incremental_over_full() {
                              "xtrabackup_keys",
                              "xtrabackup_tablespaces",
                              "xtrabackup_component_keyring_file.cnf",
+                             "xtrabackup_component_keyring_kmip.cnf",
                              "ib_lru_dump",
                              nullptr};
   bool ret = true;
@@ -2090,6 +2093,7 @@ bool should_skip_file_on_copy_back(const char *filepath) {
                             "xtrabackup_checkpoints",
                             "xtrabackup_tablespaces",
                             "xtrabackup_component_keyring_file.cnf",
+                            "xtrabackup_component_keyring_kmip.cnf",
                             ".qp",
                             ".lz4",
                             ".pmap",
