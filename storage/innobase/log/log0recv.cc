@@ -98,6 +98,12 @@ recv_sys_t *recv_sys = nullptr;
 otherwise.  Note that this is false while a background thread is
 rolling back incomplete transactions. */
 volatile bool recv_recovery_on;
+extern bool opt_page_tracking;
+extern char *xtrabackup_incremental;
+extern lsn_t incremental_start_checkpoint_lsn;
+
+/**  map of sapce_id, that experienced an inplace DDL during a backup op */
+std::map<space_id_t, bool> index_load_map;
 
 #ifdef UNIV_HOTBACKUP
 std::list<std::pair<space_id_t, lsn_t>> index_load_list;
