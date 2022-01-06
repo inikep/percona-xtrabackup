@@ -6430,8 +6430,8 @@ fil_load_status Fil_shard::ibd_open_for_recovery(space_id_t space_id,
       use_dumped_tablespace_keys) {
     err = xb_set_encryption(space);
     if (err != DB_SUCCESS) {
-      ib::error() << "Cannot find encryption key for tablespace '%s'."
-                  << space->name;
+      xb::error() << "Cannot find encryption key for tablespace "
+                  << SQUOTE(space->name);
       return (FIL_LOAD_INVALID);
     }
   }
@@ -10070,7 +10070,7 @@ dberr_t Fil_system::open_for_recovery(space_id_t space_id) {
 
     return err;
   } else if (status == FIL_LOAD_INVALID_ENCRYPTION_META) {
-    ib::error() << "Invalid encryption metadata in tablespace header.";
+    xb::error() << "Invalid encryption metadata in tablespace header.";
     exit(EXIT_FAILURE);
   }
 
@@ -10431,7 +10431,7 @@ byte *fil_tablespace_redo_create(byte *ptr, const byte *end,
     bool exists = Fil_path(abs_file_path).is_file_and_exists();
 
     if (!exists && !fil_space_get(page_id.space())) {
-      ib::info() << "Creating the tablespace : " << abs_file_path
+      xb::info() << "Creating the tablespace : " << abs_file_path
                  << ", space_id : " << page_id.space();
 
       dberr_t ret = fil_ibd_create(page_id.space(), tablespace_name.c_str(),
@@ -10439,7 +10439,7 @@ byte *fil_tablespace_redo_create(byte *ptr, const byte *end,
                                    FIL_IBD_FILE_INITIAL_SIZE);
 
       if (ret != DB_SUCCESS) {
-        ib::fatal(UT_LOCATION_HERE)
+        xb::fatal(UT_LOCATION_HERE)
             << "Could not create the tablespace : " << abs_file_path
             << " with space Id : " << page_id.space();
       }
@@ -10447,7 +10447,7 @@ byte *fil_tablespace_redo_create(byte *ptr, const byte *end,
       bool success = fil_system->insert(page_id.space(), abs_file_path);
 
       if (!success) {
-        ib::fatal(UT_LOCATION_HERE)
+        xb::fatal(UT_LOCATION_HERE)
             << "Could not insert the tablespace : " << abs_file_path
             << " with space Id : " << page_id.space() << " to "
             << "the list of known tablespaces";
@@ -10601,7 +10601,7 @@ byte *fil_tablespace_redo_rename(byte *ptr, const byte *end,
   if (!srv_backup_mode) {
     bool success;
     if (fil_tablespace_open_for_recovery(page_id.space()) != DB_SUCCESS) {
-      ib::info() << "Rename failed. Cannot find '" << from_name << "'!";
+      xb::info() << "Rename failed. Cannot find " << SQUOTE(from_name) << "!";
       return (ptr);
     }
 
@@ -10629,7 +10629,7 @@ byte *fil_tablespace_redo_rename(byte *ptr, const byte *end,
     success = fil_system->insert(page_id.space(), to_name);
 
     if (!success) {
-      ib::fatal(UT_LOCATION_HERE)
+      xb::fatal(UT_LOCATION_HERE)
           << "Could not insert the tablespace : " << to_name
           << " with space Id : " << page_id.space() << " to "
           << "the list of known tablespaces";
@@ -10869,7 +10869,7 @@ byte *fil_tablespace_redo_delete(byte *ptr, const byte *end,
     success = fil_tablespace_open_for_recovery(page_id.space());
 
     if (!success) {
-      ib::info(ER_IB_MSG_356) << "Delete '" << name << "' failed!";
+      xb::info(ER_IB_MSG_356) << "Delete " << SQUOTE(name) << " failed!";
       return (ptr);
     }
 
@@ -10975,7 +10975,7 @@ byte *fil_tablespace_redo_encryption(byte *ptr, const byte *end,
     if (!Encryption::decode_encryption_info(space_id, e_key, encryption_ptr,
                                             true)) {
       if (!srv_backup_mode) {
-        ib::error() << "Cannot decode encryption information in the redo log.";
+        xb::error() << "Cannot decode encryption information in the redo log.";
         exit(EXIT_FAILURE);
       }
       return (ptr + len);
@@ -11458,7 +11458,7 @@ dberr_t fil_open_for_xtrabackup(const std::string &path,
   /* by opening the tablespace we forcing node and space objects
   in the cache to be populated with fields from space header */
   if (!fil_space_open(space->id)) {
-    ib::error() << "Failed to open tablespace " << space->name;
+    xb::error() << "Failed to open tablespace " << space->name;
   }
 
   if (!srv_backup_mode || srv_close_files) {

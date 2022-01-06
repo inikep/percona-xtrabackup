@@ -1678,10 +1678,10 @@ static byte *recv_parse_or_apply_log_rec_body(
       /* error out backup if undo truncation happens during backup */
       if (srv_backup_mode && fsp_is_undo_tablespace(space_id) &&
           backup_redo_log_flushed_lsn < recv_sys->recovered_lsn) {
-        ib::info() << "Last flushed lsn: " << backup_redo_log_flushed_lsn
+        xb::info() << "Last flushed lsn: " << backup_redo_log_flushed_lsn
                    << " undo_delete lsn " << recv_sys->recovered_lsn;
 
-        ib::error(ER_IB_MSG_716)
+        xb::error(ER_IB_MSG_716)
             << "An undo ddl truncation (could be automatic)"
             << " operation has been"
             << " performed. \n"
@@ -1841,7 +1841,7 @@ static byte *recv_parse_or_apply_log_rec_body(
             ptr_copy += Encryption::MAGIC_SIZE;
             uint type = mach_read_from_1(ptr_copy);
             if (type != Encryption::CRYPT_SCHEME_UNENCRYPTED) {
-              ib::error(ER_IB_MSG_716)
+              xb::error(ER_IB_MSG_716)
                   << "Can't take backup of tablespace encrypted with KEYRING "
                   << "encryption";
               exit(EXIT_FAILURE);
