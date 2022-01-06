@@ -329,6 +329,7 @@ class Timer {
 
 }  // namespace ib
 
+
 #ifdef UNIV_HOTBACKUP
 /** Sprintfs a timestamp to a buffer with no spaces and with ':' characters
 replaced by '_'.

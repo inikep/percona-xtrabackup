@@ -538,3 +538,24 @@ fatal_or_error::~fatal_or_error() {
 #endif /* !UNIV_NO_ERR_MSGS */
 
 }  // namespace ib
+
+namespace xb {
+fatal::~fatal() {
+  log_event("[FATAL] " + m_oss.str(), m_module);
+  ut_dbg_assertion_failed("xb::fatal triggered", m_location.filename,
+                          m_location.line);
+}
+
+fatal_or_error::~fatal_or_error() {
+  const std::string &temp = m_oss.str();
+  m_oss.seekp(0);
+  m_oss << "[FATAL] ";
+  m_oss << temp;
+  if (m_fatal) {
+    log_event(m_oss.str(), m_module);
+    ut_dbg_assertion_failed("xb::fatal_or_error triggered", m_location.filename,
+                            m_location.line);
+  }
+}
+
+}  // namespace xb

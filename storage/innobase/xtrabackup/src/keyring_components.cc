@@ -54,17 +54,17 @@ bool inititialize_service_handles() {
 
   reg_srv = mysql_plugin_registry_acquire();
   if (reg_srv == nullptr) {
-    msg("xtrabackup: mysql_plugin_registry_acquire failed\n");
+    xb::error() << "mysql_plugin_registry_acquire failed";
     return false;
   }
 
   /* Add module specific initialization here */
   if (innobase::encryption::init_keyring_services(reg_srv) == false) {
-    msg("xtrabackup: init_keyring_services failed\n");
+    xb::error() << "init_keyring_services failed";
     cleanup();
     return false;
   }
-  msg("xtrabackup: inititialize_service_handles suceeded\n");
+  xb::info() << "inititialize_service_handles suceeded";
   service_handler_initialized = true;
   return true;
 }
@@ -200,11 +200,11 @@ bool keyring_init_offline() {
   set_component_config_path(XTRABACKUP_KEYRING_FILE_CONFIG, fname);
 
   if (xtrabackup_stats) {
-    msg_ts("xtrabackup: Encryption is not supported with --stats");
+    xb::error() << "Encryption is not supported with --stats";
     return false;
   }
   if (config.length() == 0) {
-    msg("xtrabackup: Error: Component configuration file is empty.\n");
+    xb::error() << "Component configuration file is empty.";
     return false;
   }
 
