@@ -779,7 +779,7 @@ static dberr_t srv_undo_tablespaces_open(bool backup_mode) {
 
         err = srv_undo_tablespace_open_by_id(space_id);
         if (err != DB_SUCCESS) {
-          ib::error(ER_IB_MSG_CANNOT_OPEN_57_UNDO, ulong{space_id});
+          xb::error(ER_IB_MSG_CANNOT_OPEN_57_UNDO, ulong{space_id});
           return (err);
         }
       }
