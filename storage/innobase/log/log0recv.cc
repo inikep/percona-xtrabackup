@@ -99,6 +99,10 @@ otherwise.  Note that this is false while a background thread is
 rolling back incomplete transactions. */
 volatile bool recv_recovery_on;
 volatile lsn_t backup_redo_log_flushed_lsn;
+#ifdef XTRABACKUP
+/** map of space_id, that experienced an inplace DDL during a backup op */
+std::map<space_id_t, bool> index_load_map;
+#endif /* XTRABACKUP */
 
 #ifdef UNIV_HOTBACKUP
 std::list<std::pair<space_id_t, lsn_t>> index_load_list;
