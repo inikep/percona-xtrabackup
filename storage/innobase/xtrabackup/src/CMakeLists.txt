@@ -197,6 +197,7 @@ TARGET_LINK_LIBRARIES(xbstream
 # xbcrypt binary
 ########################################################################
 MYSQL_ADD_EXECUTABLE(xbcrypt
+  file_utils.cc
   xbcrypt.cc
   xbcrypt_common.cc
   xbcrypt_read.cc
