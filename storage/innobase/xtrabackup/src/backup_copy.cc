@@ -1,6 +1,6 @@
 /******************************************************
 hot backup tool for InnoDB
-(c) 2009-2021 Percona LLC and/or its affiliates
+(c) 2009-2022 Percona LLC and/or its affiliates
 Originally Created 3/3/2009 Yasufumi Kinoshita
 Written by Alexey Kopytov, Aleksandr Kuzminsky, Stewart Smith, Vadim Tkachenko,
 Yasufumi Kinoshita, Ignacio Nin and Baron Schwartz.
@@ -401,8 +401,6 @@ static bool datafile_copy_backup(const char *filepath, uint thread_n) {
                             "sdi",
                             "mysqld.my",
                             "mysqld-debug.my",
-                            "component_keyring_file.cnf",
-                            "component_keyring_kmip.cnf",
                             NULL};
 
   /* Get the name and the path for the tablespace. node->name always
@@ -1823,16 +1821,18 @@ bool binlog_file_location::find_binlog(const std::string &dir,
 bool copy_incremental_over_full() {
   const char *ext_list[] = {"MYD", "MYI", "MAD", "MAI", "MRG", "ARM",
                             "ARZ", "CSM", "CSV", "opt", "sdi", nullptr};
-  const char *sup_files[] = {"xtrabackup_binlog_info",
-                             "xtrabackup_galera_info",
-                             "xtrabackup_slave_info",
-                             "xtrabackup_info",
-                             "xtrabackup_keys",
-                             "xtrabackup_tablespaces",
-                             "xtrabackup_component_keyring_file.cnf",
-                             "xtrabackup_component_keyring_kmip.cnf",
-                             "ib_lru_dump",
-                             nullptr};
+  const char *sup_files[] = {
+      "xtrabackup_binlog_info",
+      "xtrabackup_galera_info",
+      "xtrabackup_slave_info",
+      "xtrabackup_info",
+      "xtrabackup_keys",
+      "xtrabackup_tablespaces",
+      xtrabackup::components::XTRABACKUP_KEYRING_FILE_CONFIG,
+      xtrabackup::components::XTRABACKUP_KEYRING_KMIP_CONFIG,
+      xtrabackup::components::XTRABACKUP_KEYRING_KMS_CONFIG,
+      "ib_lru_dump",
+      nullptr};
   bool ret = true;
   char path[FN_REFLEN];
   int i;
@@ -2030,20 +2030,22 @@ bool should_skip_file_on_copy_back(const char *filepath) {
   char c_tmp;
   int i_tmp;
 
-  const char *ext_list[] = {"backup-my.cnf",
-                            "xtrabackup_logfile",
-                            "xtrabackup_binary",
-                            "xtrabackup_binlog_info",
-                            "xtrabackup_checkpoints",
-                            "xtrabackup_tablespaces",
-                            "xtrabackup_component_keyring_file.cnf",
-                            "xtrabackup_component_keyring_kmip.cnf",
-                            ".qp",
-                            ".lz4",
-                            ".pmap",
-                            ".tmp",
-                            ".xbcrypt",
-                            NULL};
+  const char *ext_list[] = {
+      "backup-my.cnf",
+      "xtrabackup_logfile",
+      "xtrabackup_binary",
+      "xtrabackup_binlog_info",
+      "xtrabackup_checkpoints",
+      "xtrabackup_tablespaces",
+      xtrabackup::components::XTRABACKUP_KEYRING_FILE_CONFIG,
+      xtrabackup::components::XTRABACKUP_KEYRING_KMIP_CONFIG,
+      xtrabackup::components::XTRABACKUP_KEYRING_KMS_CONFIG,
+      ".qp",
+      ".lz4",
+      ".pmap",
+      ".tmp",
+      ".xbcrypt",
+      NULL};
 
   filename = base_name(filepath);
 

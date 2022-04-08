@@ -1,5 +1,5 @@
 /******************************************************
-Copyright (c) 2021 Percona LLC and/or its affiliates.
+Copyright (c) 2021-2022 Percona LLC and/or its affiliates.
 
 This program is free software; you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -31,9 +31,11 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
 namespace xtrabackup {
 namespace components {
 
-const char *XTRABACKUP_KEYRING_FILE_CONFIG = "xtrabackup_component_keyring_file.cnf";
+const char *XTRABACKUP_KEYRING_FILE_CONFIG = "component_keyring_file.cnf";
 
-const char *XTRABACKUP_KEYRING_KMIP_CONFIG = "xtrabackup_component_keyring_kmip.cnf";
+const char *XTRABACKUP_KEYRING_KMIP_CONFIG = "component_keyring_kmip.cnf";
+
+const char *XTRABACKUP_KEYRING_KMS_CONFIG = "component_keyring_kms.cnf";
 
 SERVICE_TYPE(registry) *reg_srv = nullptr;
 SERVICE_TYPE(keyring_reader_with_status) *keyring_reader_service = nullptr;
@@ -87,6 +89,20 @@ static bool initialize_manifest_file_components(std::string components) {
     return true;
   }
   return false;
+}
+
+/** validate component fetched from keyring_component_status
+to xtrabackup filename.
+@return config file name or nullptr in case of not found */
+const char *xb_component_config_file() {
+  if (component_name == "component_keyring_file") {
+    return XTRABACKUP_KEYRING_FILE_CONFIG;
+  } else if (component_name == "component_keyring_kmip") {
+    return XTRABACKUP_KEYRING_KMIP_CONFIG;
+  } else if (component_name == "component_keyring_kms") {
+    return XTRABACKUP_KEYRING_KMS_CONFIG;
+  }
+  return nullptr;
 }
 
 /** Check if component file exist on plugin dir or datadir setting
@@ -166,8 +182,18 @@ bool keyring_init_online(MYSQL *connection) {
 }
 
 bool set_component_config_path(const char *component_config, char *fname) {
-  if (opt_component_keyring_file_config != nullptr) {
-    strncpy(fname, opt_component_keyring_file_config, FN_REFLEN);
+  if (opt_component_keyring_config != nullptr) {
+    char filepart[FN_REFLEN];
+    /* extract file part of full path */
+    if (fn_format(filepart, opt_component_keyring_config, "", "",
+                  MY_REPLACE_DIR) == NULL) {
+      return (false);
+    }
+    if (strcmp(filepart, component_config) == 0) {
+      strncpy(fname, opt_component_keyring_config, FN_REFLEN);
+      return (true);
+    }
+    return (false);
   } else if (xtrabackup_stats) {
     if (fn_format(fname, component_config, mysql_real_data_home, "",
                   MY_UNPACK_FILENAME | MY_SAFE_PATH) == NULL) {
@@ -194,21 +220,51 @@ bool keyring_init_offline() {
   if (!xtrabackup::utils::read_server_uuid()) return (false);
 
   char fname[FN_REFLEN];
-  std::string config;
-  std::string component_name;
+  std::string component_urn;
+  os_file_type_t type;
+  bool exists = false;
   /* keyring file */
-  set_component_config_path(XTRABACKUP_KEYRING_FILE_CONFIG, fname);
-
-  if (xtrabackup_stats) {
-    xb::error() << "Encryption is not supported with --stats";
-    return false;
-  }
-  if (config.length() == 0) {
-    xb::error() << "Component configuration file is empty.";
-    return false;
+  if (set_component_config_path(XTRABACKUP_KEYRING_FILE_CONFIG, fname)) {
+    os_file_status(fname, &exists, &type);
+    if (exists) {
+      component_urn = "file://component_keyring_file";
+      component_config_path = fname;
+      goto init_components;
+    }
   }
 
-  if (initialize_manifest_file_components(component_name)) return false;
+  /* keyring kmip */
+  if (set_component_config_path(XTRABACKUP_KEYRING_KMIP_CONFIG, fname)) {
+    os_file_status(fname, &exists, &type);
+    if (exists) {
+      component_urn = "file://component_keyring_kmip";
+      component_config_path = fname;
+      goto init_components;
+    }
+  }
+
+  /* keyring kms */
+  if (set_component_config_path(XTRABACKUP_KEYRING_KMS_CONFIG, fname)) {
+    os_file_status(fname, &exists, &type);
+    if (exists) {
+      component_urn = "file://component_keyring_kms";
+      component_config_path = fname;
+      goto init_components;
+    }
+  }
+
+  if (opt_component_keyring_config != nullptr) {
+    /* user have set --component-keyring-config but it did not match any of know
+     * componenets. Abort */
+    xb::error() << "Unable to read " << opt_component_keyring_config
+                << " passed as --component-keyring-config parameter";
+    exit(EXIT_FAILURE);
+  }
+  /* no component to load */
+  return true;
+
+init_components:
+  if (initialize_manifest_file_components(component_urn)) return false;
   set_srv_keyring_implementation_as_default();
   keyring_component_initialized = true;
   return true;

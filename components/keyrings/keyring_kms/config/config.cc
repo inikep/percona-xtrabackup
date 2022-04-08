@@ -1,4 +1,5 @@
-/* Copyright (c) 2021, 2023, Oracle and/or its affiliates.
+/* Copyright (c) 2021, Oracle and/or its affiliates.
+   Copyright (c) 2022, Percona and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -25,12 +26,11 @@
 #define RAPIDJSON_HAS_STDSTRING 1
 
 #include "my_rapidjson_size_t.h"
+#include "rapidjson/document.h"
+#include "rapidjson/stringbuffer.h"
+#include "rapidjson/writer.h"
 
-#include <rapidjson/document.h>
-#include <rapidjson/stringbuffer.h>
-#include <rapidjson/writer.h>
-
-#include <components/keyrings/keyring_file/keyring_file.h>
+#include <components/keyrings/keyring_kms/keyring_kms.h>
 
 #include <components/keyrings/common/config/config_reader.h> /* Config_reader */
 #include <include/mysql/components/component_implementation.h>
@@ -39,15 +39,15 @@
 #endif
 
 using keyring_common::config::Config_reader;
-using keyring_file::g_config_pod;
+using keyring_kms::g_config_pod;
 
 /**
   In order to locate a shared library, we need it to export at least
   one symbol. This way dlsym/GetProcAddress will be able to find it.
 */
-DLL_EXPORT int keyring_file_component_exported_symbol() { return 0; }
+DLL_EXPORT int keyring_kms_component_exported_symbol() { return 0; }
 
-namespace keyring_file {
+namespace keyring_kms {
 
 namespace config {
 
@@ -56,21 +56,22 @@ char *g_instance_path = nullptr;
 
 /* Component metadata */
 static const char *s_component_metadata[][2] = {
-    {"Component_name", "component_keyring_file"},
-    {"Author", "Oracle Corporation"},
+    {"Component_name", "component_keyring_kms"},
+    {"Author", "Percona Corporation"},
     {"License", "GPL"},
-    {"Implementation_name", "component_keyring_file"},
+    {"Implementation_name", "component_keyring_kms"},
     {"Version", "1.0"}};
 
 /* Config file name */
-const std::string config_file_name = "component_keyring_file.cnf";
+static const std::string config_file_name = "component_keyring_kms.cnf";
 
 /* Config names */
-const std::string config_options[] = {"read_local_config", "path", "read_only"};
+static const std::string config_options[] = {
+    "read_local_config", "path",     "read_only",        "region",
+    "kms_key",           "auth_key", "secret_access_key"};
 
 bool find_and_read_config_file(std::unique_ptr<Config_pod> &config_pod) {
-  config_pod = std::make_unique<Config_pod>();
-  if (!config_pod) return true;
+  std::unique_ptr<Config_pod> config_pod_tmp = std::make_unique<Config_pod>();
   /* Get shared library location */
   std::string path(g_component_path);
 
@@ -85,12 +86,12 @@ bool find_and_read_config_file(std::unique_ptr<Config_pod> &config_pod) {
     return false;
   };
   if (set_config_path(path) == true) return true;
+
 #ifdef XTRABACKUP
   path = xtrabackup::components::component_config_path;
 #endif
   /* Read config file that's located at shared library location */
-  std::unique_ptr<Config_reader> config_reader(new (std::nothrow)
-                                                   Config_reader(path));
+  std::unique_ptr<Config_reader> config_reader(new Config_reader(path));
 
   {
     bool read_local_config = false;
@@ -112,12 +113,34 @@ bool find_and_read_config_file(std::unique_ptr<Config_pod> &config_pod) {
   }
 
   if (config_reader->get_element<std::string>(
-          config_options[1], config_pod.get()->config_file_path_) ||
+          config_options[1], config_pod_tmp.get()->config_file_path_) ||
       config_reader->get_element<bool>(config_options[2],
-                                       config_pod.get()->read_only_)) {
-    config_pod.reset();
+                                       config_pod_tmp.get()->read_only_)) {
+    config_pod_tmp.reset();
     return true;
   }
+
+  if (config_reader->get_element<std::string>(config_options[3],
+                                              config_pod_tmp.get()->region_)) {
+    return true;
+  }
+
+  if (config_reader->get_element<std::string>(config_options[4],
+                                              config_pod_tmp.get()->kms_key_)) {
+    return true;
+  }
+
+  if (config_reader->get_element<std::string>(
+          config_options[5], config_pod_tmp.get()->auth_key_)) {
+    return true;
+  }
+
+  if (config_reader->get_element<std::string>(
+          config_options[6], config_pod_tmp.get()->secret_access_key_)) {
+    return true;
+  }
+
+  config_pod.swap(config_pod_tmp);
   return false;
 }
 
@@ -127,22 +150,22 @@ bool create_config(
   metadata =
       std::make_unique<std::vector<std::pair<std::string, std::string>>>();
   if (metadata.get() == nullptr) return true;
-  keyring_file::config::Config_pod config_pod;
+  keyring_kms::config::Config_pod config_pod;
   bool global_config_available = false;
   if (g_config_pod != nullptr) {
     config_pod = *g_config_pod;
     global_config_available = true;
   }
 
-  for (auto entry : keyring_file::config::s_component_metadata) {
+  for (auto entry : keyring_kms::config::s_component_metadata) {
     metadata.get()->push_back(std::make_pair(entry[0], entry[1]));
   }
 
   /* Status */
   metadata.get()->push_back(std::make_pair(
       "Component_status",
-      keyring_file::g_component_callbacks->keyring_initialized() ? "Active"
-                                                                 : "Disabled"));
+      keyring_kms::g_component_callbacks->keyring_initialized() ? "Active"
+                                                                : "Disabled"));
 
   /* Backend file */
   metadata.get()->push_back(std::make_pair(
@@ -158,8 +181,15 @@ bool create_config(
                         ? ((config_pod.read_only_ == true) ? "Yes" : "No")
                         : "<NOT APPLICABLE>")));
 
+  metadata.get()->push_back(std::make_pair(
+      "KeyId",
+      ((global_config_available == true)
+           ? ((config_pod.kms_key_.length() == 0) ? "<NONE>"
+                                                  : config_pod.kms_key_)
+           : "<NOT APPLICABLE>")));
+
   return false;
 }
 
 }  // namespace config
-}  // namespace keyring_file
+}  // namespace keyring_kms
