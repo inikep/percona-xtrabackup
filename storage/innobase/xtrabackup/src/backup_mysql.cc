@@ -423,6 +423,7 @@ bool get_mysql_vars(MYSQL *connection) {
   char *innodb_checksum_algorithm_var = nullptr;
   char *innodb_redo_log_encrypt_var = nullptr;
   char *innodb_undo_log_encrypt_var = nullptr;
+  char *server_plugin_dir_var = nullptr;
   char *server_uuid_var = nullptr;
   char *rocksdb_datadir_var = nullptr;
   char *rocksdb_wal_dir_var = nullptr;
@@ -457,6 +458,7 @@ bool get_mysql_vars(MYSQL *connection) {
       {"innodb_redo_log_encrypt", &innodb_redo_log_encrypt_var},
       {"innodb_undo_log_encrypt", &innodb_undo_log_encrypt_var},
       {"server_uuid", &server_uuid_var},
+      {"plugin_dir", &server_plugin_dir_var},
       {"rocksdb_datadir", &rocksdb_datadir_var},
       {"rocksdb_wal_dir", &rocksdb_wal_dir_var},
       {"rocksdb_disable_file_deletions", &rocksdb_disable_file_deletions_var},
@@ -608,6 +610,11 @@ bool get_mysql_vars(MYSQL *connection) {
     } else {
       srv_log_checksums = false;
     }
+  }
+
+  if (!check_if_param_set("plugin_dir") && server_plugin_dir_var) {
+    server_plugin_dir =
+        my_strdup(PSI_NOT_INSTRUMENTED, server_plugin_dir_var, MYF(MY_FAE));
   }
 
   memset(server_uuid, 0, Encryption::SERVER_UUID_LEN + 1);
