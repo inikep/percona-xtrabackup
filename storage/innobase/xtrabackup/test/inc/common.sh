@@ -11,6 +11,7 @@ function save_backup()
 
 function xtrabackup()
 {
+  if [ -z ${WITH_RR+x} ]; then
     run_cmd $XB_BIN $XB_ARGS "$@"
 
 #### for --backup, copy backup director into var if -k option is passed
