@@ -562,24 +562,29 @@ dict_table_t *dd_table_create_on_dd_obj(const dd::Table *dd_table,
     table->flags |= DICT_TF_MASK_DATA_DIR;
   }
 
-  /* If the table has instantly added columns, it's necessary to read
-  the number of instant columns for either normal table(from dd::Table),
-  or partitioned table(from dd::Partition). One partition may have no
-  instant columns, which is fine. */
-  if (dd_table_has_instant_cols(*dd_table)) {
-    uint32_t instant_cols;
+  const dd::Properties &table_se_private = dd_table->se_private_data();
+  /* Note : In V2, we don't need number of columns in table when first INSTANT
+  ADD was done. */
+
+  /* For upgraded table having INSTANT ADD added columns in V1, it's necessary
+  to read the number of instant columns for normal table (from dd::Table) or
+  for partitioned table (from dd::Partition). One partition may have no instant
+  columns, which is fine. */
+  if (dd_table_is_upgraded_instant(*dd_table)) {
+    auto fn = [&](const dd::Properties &p, const char *s) {
+      uint32_t n_inst_cols;
+      ut_a(p.exists(s));
+      p.get(s, &n_inst_cols);
+      table->set_instant_cols(n_inst_cols);
+      table->set_upgraded_instant();
+      ut_ad(table->has_instant_cols());
+    };
 
     if (dd_part == nullptr) {
-      dd_table->se_private_data().get(
-          dd_table_key_strings[DD_TABLE_INSTANT_COLS], &instant_cols);
-      table->set_instant_cols(instant_cols);
-      ut_ad(table->has_instant_cols());
+      fn(table_se_private, dd_table_key_strings[DD_TABLE_INSTANT_COLS]);
     } else if (dd_part_has_instant_cols(*dd_part)) {
-      dd_part->se_private_data().get(
-          dd_partition_key_strings[DD_PARTITION_INSTANT_COLS], &instant_cols);
-
-      table->set_instant_cols(instant_cols);
-      ut_ad(table->has_instant_cols());
+      fn(dd_part->se_private_data(),
+         dd_partition_key_strings[DD_PARTITION_INSTANT_COLS]);
     }
   }
 
@@ -869,6 +874,34 @@ dict_table_t *dd_table_create_on_dd_obj(const dd::Table *dd_table,
 
   /* Add system columns to make adding index work */
   dict_table_add_system_columns(table, heap);
+
+  if (table->has_row_versions()) {
+    /* Read physical pos for system columns. */
+
+    auto fn = [&](uint32_t sys_col, const char *name) {
+      const dd::Column *dd_col = dd_find_column(&dd_table->table(), name);
+
+      uint32_t phy_pos = UINT32_UNDEFINED;
+      const char *s = dd_column_key_strings[DD_INSTANT_PHYSICAL_POS];
+      if (dd_col && dd_col->se_private_data().exists(s)) {
+        dd_col->se_private_data().get(s, &phy_pos);
+      }
+
+      dict_col_t *dict_col = table->get_sys_col(sys_col);
+      dict_col->set_phy_pos(phy_pos);
+    };
+
+    fn(DATA_ROW_ID, "DB_ROW_ID");
+    fn(DATA_TRX_ID, "DB_TRX_ID");
+    fn(DATA_ROLL_PTR, "DB_ROLL_PTR");
+  }
+
+  IF_DEBUG(uint32_t crv = 0;)
+  /* If table has INSTANT DROP columns, add them now. */
+  if (table->has_instant_drop_cols()) {
+    fill_dict_dropped_columns(&dd_table->table(), table,
+                              IF_DEBUG(crv, ) heap);
+  }
 
   /* add instant column default value */
   if (table->has_instant_cols() || table->has_row_versions()) {
