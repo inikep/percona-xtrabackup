@@ -82,6 +82,7 @@ MYSQL_ADD_EXECUTABLE(xtrabackup
   ds_buffer.cc
   ds_compress.cc
   ds_compress_lz4.cc
+  ds_compress_zstd.cc
   ds_encrypt.cc
   ds_local.cc
   ds_stdout.cc
@@ -166,6 +167,7 @@ MYSQL_ADD_EXECUTABLE(xbstream
   ds_decompress.cc
   ds_decrypt.cc
   ds_decompress_lz4.cc
+  ds_decompress_zstd.cc
   datasink.cc
   file_utils.cc
   quicklz/quicklz.c
@@ -184,6 +186,7 @@ MY_ADD_COMPILE_DEFINITIONS(
 ADD_COMPILE_FLAGS(
     ${BUNDLED_LZ4_PATH}/xxhash.c
     ds_decompress_lz4.cc
+    ds_decompress_zstd.cc
     ds_compress_lz4.cc
     COMPILE_FLAGS -I${CMAKE_SOURCE_DIR}/extra/lz4 -I${BUNDLED_LZ4_PATH}
 )
