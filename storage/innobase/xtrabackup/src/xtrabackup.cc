@@ -3552,16 +3552,21 @@ static void xtrabackup_destroy_datasinks(void) {
 
 /************************************************************************
 Initializes the I/O and tablespace cache subsystems. */
-static void xb_fil_io_init(void)
+static bool xb_fil_io_init(void)
 /*================*/
 {
   srv_n_file_io_threads = srv_n_read_io_threads;
 
-  os_aio_init(srv_n_read_io_threads, srv_n_write_io_threads);
+  if (!os_aio_init(srv_n_read_io_threads, srv_n_write_io_threads)) {
+    xb::error() << "Cannot initialize AIO sub-system.";
+    return false;
+  }
 
   fil_init(LONG_MAX);
 
   fsp_init();
+
+  return true;
 }
 
 /****************************************************************************
@@ -3635,7 +3640,11 @@ ulint xb_data_files_init(void)
 /*====================*/
 {
   os_create_block_cache();
-  xb_fil_io_init();
+
+  if (!xb_fil_io_init()) {
+    return DB_IO_ERROR;
+  }
+
   undo_spaces_init();
 
   return (xb_load_tablespaces());
@@ -4266,7 +4275,9 @@ void xtrabackup_backup_func(void) {
 
   os_create_block_cache();
 
-  xb_fil_io_init();
+  if (!xb_fil_io_init()) {
+    exit(EXIT_FAILURE);
+  }
 
   Redo_Log_Data_Manager redo_mgr;
 
