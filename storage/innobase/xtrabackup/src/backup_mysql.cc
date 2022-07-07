@@ -168,6 +168,21 @@ MYSQL *xb_mysql_connect() {
 
   xb_mysql_query(connection, "SET SESSION wait_timeout=2147483", false, true);
 
+  if (xb_mysql_numrows(connection,
+                       "SHOW GLOBAL VARIABLES LIKE 'wsrep_sync_wait'",
+                       false) > 0) {
+    xb_mysql_query(connection, "SET SESSION wsrep_sync_wait=0", false, true);
+  }
+
+  if (xb_mysql_numrows(
+          connection,
+          "SELECT * FROM performance_schema.replication_group_members",
+          false) > 0) {
+    xb_mysql_query(connection,
+                   "SET SESSION group_replication_consistency=EVENTUAL", false,
+                   true);
+  }
+
   xb_mysql_query(connection, "SET SESSION autocommit=1", false, true);
 
   xb_mysql_query(connection, "SET NAMES utf8", false, true);
@@ -1045,10 +1060,6 @@ bool lock_tables_ftwrl(MYSQL *connection) {
 
   if (opt_kill_long_queries_timeout) {
     start_query_killer();
-  }
-
-  if (have_galera_enabled) {
-    xb_mysql_query(connection, "SET SESSION wsrep_causal_reads=0", false);
   }
 
   xb_mysql_query(connection, "FLUSH TABLES WITH READ LOCK", false);
