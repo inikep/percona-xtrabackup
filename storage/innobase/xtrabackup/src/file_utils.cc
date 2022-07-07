@@ -1,6 +1,33 @@
+/******************************************************
+Copyright (c) 2021-2023 Percona LLC and/or its affiliates.
+
+Streaming implementation for XtraBackup.
+
+This program is free software; you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation; version 2 of the License.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program; if not, write to the Free Software
+Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA
+
+*******************************************************/
+
 #include "file_utils.h"
 #include <mysql/service_mysql_alloc.h>
+#ifdef __APPLE__
+#include <sys/event.h>
+#else
+#include <sys/epoll.h>
+#endif
+#include <thread>
 #include "common.h"
+#include "ds_fifo.h"
 #include "msg.h"
 #include "my_dir.h"
 #include "my_io.h"
@@ -314,4 +341,100 @@ bool restore_sparseness(const char *src_file_path, uint buffer_size,
   }
   datafile_close(&cursor);
   return true;
+}
+
+File open_fifo_for_write_with_timeout(const char *path, uint timeout) {
+  File fd;
+  uint attempt = 0;
+  do {
+    fd = my_open(path, O_WRONLY | O_NONBLOCK, MYF(0));
+    if (fd < 0) {
+      attempt++;
+      std::this_thread::sleep_for(std::chrono::seconds(1));
+    }
+
+  } while (fd < 0 && attempt < timeout);
+  if (fd < 0) {
+    return -1;
+  }
+  /* Adjust file flags to blocking - we are in sync mode now. */
+  if (fcntl(fd, F_SETFL, O_WRONLY) == -1) {
+    my_close(fd, MYF(0));
+    return -1;
+  }
+
+  /*
+   * Signals the read side by writing DS_FIFO_CONTROL_CHAR
+   * This triggers EVFILT_READ/EPOLLIN. This is necessary because
+   * the read side is also opened in non-blocking mode. We change
+   * back to blocking node once kqueue/epoll is notified. The way
+   * to notify that data is available to read is to write some data
+   * to it.
+   */
+  my_write(fd, (uchar *)DS_FIFO_CONTROL_CHAR, 1, MYF(0));
+  return fd;
+}
+
+File open_fifo_for_read_with_timeout(const char *path, uint timeout) {
+  int fd;
+  uint attempt = 0;
+  do {
+    fd = my_open(path, O_RDONLY | O_NONBLOCK, MYF(0));
+    if (fd < 0) {
+      attempt++;
+      std::this_thread::sleep_for(std::chrono::seconds(1));
+    }
+  } while (fd < 0 && attempt < timeout);
+
+  if (fd < 0) {
+    return -1;
+  }
+
+  /* File was open, lets check its open on the other side */
+#ifdef __APPLE__
+  struct timespec tm = {timeout, 0};
+  int kqueue_fd = kqueue();
+  if (kqueue_fd < 0) {
+    return -1;
+  }
+  struct kevent ev;
+  EV_SET(&ev, fd, EVFILT_READ, EV_ADD, 0, 0, NULL);
+  if (kevent(kqueue_fd, &ev, 1, NULL, 0, NULL) < 0) {
+    return -1;
+  }
+  if (kevent(kqueue_fd, NULL, 0, &ev, 1, &tm) <= 0) {
+    return -1;
+  }
+  close(kqueue_fd);
+#else
+  int epoll_fd = epoll_create1(0);
+  if (epoll_fd < 0) {
+    return -1;
+  }
+  struct epoll_event ev;
+  ev.events = EPOLLIN;
+  ev.data.fd = fd;
+  if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, fd, &ev) < 0) {
+    return -1;
+  }
+  if (epoll_wait(epoll_fd, &ev, 1, timeout * 1000) <= 0) {
+    return -1;
+  }
+  close(epoll_fd);
+#endif  // __APPLE__
+
+  if (fcntl(fd, F_SETFL, O_RDONLY) == -1) {
+    return -1;
+  }
+
+  /* Read the control char to make sure the other side is in sync. */
+  char buf[1];
+  if (my_read(fd, (uchar *)buf, 1, MYF(0)) <= 0) {
+    return -1;
+  }
+  if (memcmp(buf, DS_FIFO_CONTROL_CHAR, 1)) {
+    return -1;
+  }
+
+  return fd;
 }

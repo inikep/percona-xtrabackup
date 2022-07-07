@@ -1,5 +1,6 @@
 /******************************************************
-Copyright (c) 2011-2022 Percona LLC and/or its affiliates.
+
+Copyright (c) 2011-2023 Percona LLC and/or its affiliates.
 
 The xbstream utility: serialize/deserialize files in the XBSTREAM format.
 
@@ -25,9 +26,12 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA
 #include <my_thread.h>
 #include <mysql/service_mysql_alloc.h>
 #include <mysql_version.h>
-#include <pthread.h>
 #include <typelib.h>
+#include <list>
+#include <mutex>
+#include <thread>
 #include <unordered_map>
+#include <vector>
 #include "common.h"
 #include "crc_glue.h"
 #include "datasink.h"
@@ -62,11 +66,15 @@ datasink_t datasink_compress_lz4;
 datasink_t datasink_compress_zstd;
 datasink_t datasink_tmpfile;
 datasink_t datasink_encrypt;
+datasink_t datasink_fifo;
 
 static run_mode_t opt_mode;
 static char *opt_directory = NULL;
 static bool opt_verbose = 0;
 static int opt_parallel = 1;
+static int opt_fifo_streams = 1;
+static char *opt_fifo_dir = nullptr;
+static uint opt_fifo_timeout = 60;
 static ulong opt_encrypt_algo;
 static char *opt_encrypt_key_file = NULL;
 static char *opt_encrypt_key = NULL;
@@ -78,7 +86,14 @@ static bool opt_absolute_names = 0;
 static const int compression_prefix_len = 4;
 static const int compression_and_encryption_prefix_len = 12;
 
-enum { OPT_DECOMPRESS = 256, OPT_DECOMPRESS_THREADS, OPT_ENCRYPT_THREADS };
+enum {
+  OPT_DECOMPRESS = 256,
+  OPT_DECOMPRESS_THREADS,
+  OPT_ENCRYPT_THREADS,
+  OPT_PARALLEL,
+  OPT_FIFO_DIR,
+  OPT_FIFO_TIMEOUT
+};
 
 static struct my_option my_long_options[] = {
     {"help", '?', "Display this help and exit.", 0, 0, 0, GET_NO_ARG, NO_ARG, 0,
@@ -105,9 +120,21 @@ static struct my_option my_long_options[] = {
      0, 0},
     {"verbose", 'v', "Print verbose output.", &opt_verbose, &opt_verbose, 0,
      GET_BOOL, NO_ARG, 0, 0, 0, 0, 0, 0},
-    {"parallel", 'p', "Number of worker threads for reading / writing.",
-     &opt_parallel, &opt_parallel, 0, GET_INT, REQUIRED_ARG, 1, 1, INT_MAX, 0,
-     0, 0},
+    {"parallel", OPT_PARALLEL,
+     "Number of worker threads for reading / writing.", &opt_parallel,
+     &opt_parallel, 0, GET_INT, REQUIRED_ARG, 1, 1, INT_MAX, 0, 0, 0},
+    {"fifo-streams", 'f',
+     "Number of FIFO files to use for parallel datafiles stream. Setting this "
+     "parameter to 1 disables FIFO and stream is sent to STDOUT",
+     &opt_fifo_streams, &opt_fifo_streams, 0, GET_INT, REQUIRED_ARG, 1, 1,
+     INT_MAX, 0, 0, 0},
+    {"fifo-dir", OPT_FIFO_DIR, "Directory to read Named Pipe.", &opt_fifo_dir,
+     &opt_fifo_dir, 0, GET_STR_ALLOC, REQUIRED_ARG, 0, 0, 0, 0, 0, 0},
+    {"fifo-timeout", OPT_FIFO_TIMEOUT,
+     "How many seconds to wait for other end to open the stream. "
+     "Default 60 seconds",
+     &opt_fifo_timeout, &opt_fifo_timeout, 0, GET_INT, REQUIRED_ARG, 60, 1,
+     INT_MAX, 0, 0, 0},
     {"decrypt", 'd', "Decrypt files ending with .xbcrypt.", &opt_encrypt_algo,
      &opt_encrypt_algo, &xbstream_encrypt_algo_typelib, GET_ENUM, REQUIRED_ARG,
      0, 0, 0, 0, 0, 0},
@@ -133,12 +160,13 @@ typedef struct {
   uint pathlen;
   my_off_t offset;
   ds_file_t *file;
-  pthread_mutex_t mutex;
+  std::mutex *mutex;
 } file_entry_t;
 
 typedef struct {
-  std::unordered_map<std::string, file_entry_t *> filehash;
-  xb_rstream_t *stream;
+  int thread_id;
+  std::unordered_map<std::string, file_entry_t *> *filehash;
+  std::list<xb_rstream_t *> *streams;
   ds_ctxt_t *ds_ctxt;
   ds_ctxt_t *ds_decompress_quicklz_ctxt;
   ds_ctxt_t *ds_decompress_lz4_ctxt;
@@ -147,7 +175,8 @@ typedef struct {
   ds_ctxt_t *ds_decrypt_lz4_ctxt;
   ds_ctxt_t *ds_decrypt_zstd_ctxt;
   ds_ctxt_t *ds_decrypt_uncompressed_ctxt;
-  pthread_mutex_t *mutex;
+  std::mutex *mutex;
+  std::atomic<bool> *has_errors;
 } extract_ctxt_t;
 
 static int get_options(int *argc, char ***argv);
@@ -173,6 +202,21 @@ int main(int argc, char **argv) {
   /* Change the current directory if -C is specified */
   if (opt_directory && my_setwd(opt_directory, MYF(MY_WME))) {
     goto err;
+  }
+
+  if (opt_mode == RUN_MODE_EXTRACT && opt_fifo_streams > 1) {
+    if (opt_fifo_dir == nullptr) {
+      msg("%s: --fifo-streams requires --fifo-dir parameter.\n", my_progname);
+      goto err;
+    }
+    /* adjust n_threads to at least fifo streams */
+    if (opt_parallel < opt_fifo_streams) {
+      msg_ts(
+          "%s: Adjusting number of threads from %d to %d to match number of "
+          "fifo streams.\n",
+          my_progname, opt_parallel, opt_fifo_streams);
+      opt_parallel = opt_fifo_streams;
+    }
   }
 
   if (opt_encrypt_algo || opt_encrypt_key) {
@@ -385,12 +429,12 @@ static file_entry_t *file_entry_new(extract_ctxt_t *ctxt, const char *path,
                                     uint pathlen) {
   file_entry_t *entry;
   ds_file_t *file;
-
   entry = (file_entry_t *)my_malloc(PSI_NOT_INSTRUMENTED, sizeof(file_entry_t),
                                     MYF(MY_WME | MY_ZEROFILL));
   if (entry == NULL) {
     return NULL;
   }
+  entry->mutex = new std::mutex();
 
   entry->path = my_strndup(PSI_NOT_INSTRUMENTED, path, pathlen, MYF(MY_WME));
   if (entry->path == NULL) {
@@ -427,8 +471,6 @@ static file_entry_t *file_entry_new(extract_ctxt_t *ctxt, const char *path,
 
   entry->file = file;
 
-  pthread_mutex_init(&entry->mutex, NULL);
-
   return entry;
 
 err:
@@ -441,36 +483,45 @@ err:
 }
 
 static void file_entry_free(file_entry_t *entry) {
-  pthread_mutex_destroy(&entry->mutex);
   ds_close(entry->file);
   my_free(entry->path);
+  delete entry->mutex;
   my_free(entry);
 }
 
-static void *extract_worker_thread_func(void *arg) {
+static void extract_worker_thread_func(extract_ctxt_t &ctxt) {
+  xb_rstream_t *stream = NULL;
   xb_rstream_chunk_t chunk;
   file_entry_t *entry;
   xb_rstream_result_t res;
 
-  extract_ctxt_t *ctxt = (extract_ctxt_t *)arg;
+  ctxt.mutex->lock();
+  stream = ctxt.streams->front();
+  ctxt.streams->pop_front();
+  ctxt.streams->push_back(stream);
+  ctxt.mutex->unlock();
 
   my_thread_init();
 
   memset(&chunk, 0, sizeof(chunk));
 
   while (1) {
-    pthread_mutex_lock(ctxt->mutex);
-    res = xb_stream_read_chunk(ctxt->stream, &chunk);
+    /* Abort in case of error in any thread */
+    if (ctxt.has_errors->load()) {
+      break;
+    }
 
+    stream->mutex->lock();
+    res = xb_stream_read_chunk(stream, &chunk);
     if (res != XB_STREAM_READ_CHUNK) {
-      pthread_mutex_unlock(ctxt->mutex);
+      stream->mutex->unlock();
       break;
     }
 
     /* If unknown type and ignorable flag is set, skip this chunk */
     if (chunk.type == XB_CHUNK_TYPE_UNKNOWN &&
         !(chunk.flags & XB_STREAM_FLAG_IGNORABLE)) {
-      pthread_mutex_unlock(ctxt->mutex);
+      stream->mutex->unlock();
       continue;
     }
 
@@ -481,27 +532,32 @@ static void *extract_worker_thread_func(void *arg) {
         msg("%s: absolute path not allowed: %.*s.\n", my_progname,
             chunk.pathlen, chunk.path);
         res = XB_STREAM_READ_ERROR;
-        pthread_mutex_unlock(ctxt->mutex);
+        stream->mutex->unlock();
         break;
       }
     }
 
+    ctxt.mutex->lock();
+    stream->mutex->unlock();
     /* See if we already have this file open */
-    entry = ctxt->filehash[chunk.path];
+    std::unordered_map<std::string, file_entry_t *>::const_iterator entry_it =
+        ctxt.filehash->find(chunk.path);
 
-    if (entry == NULL) {
-      entry = file_entry_new(ctxt, chunk.path, chunk.pathlen);
+    if (entry_it == ctxt.filehash->end()) {
+      entry = file_entry_new(&ctxt, chunk.path, chunk.pathlen);
       if (entry == NULL) {
         res = XB_STREAM_READ_ERROR;
-        pthread_mutex_unlock(ctxt->mutex);
+        ctxt.mutex->unlock();
         break;
       }
-      ctxt->filehash[chunk.path] = entry;
+      ctxt.filehash->insert({chunk.path, entry});
+    } else {
+      entry = entry_it->second;
     }
 
-    pthread_mutex_lock(&entry->mutex);
+    entry->mutex->lock();
 
-    pthread_mutex_unlock(ctxt->mutex);
+    ctxt.mutex->unlock();
 
     if (chunk.type == XB_CHUNK_TYPE_PAYLOAD ||
         chunk.type == XB_CHUNK_TYPE_SPARSE) {
@@ -509,21 +565,21 @@ static void *extract_worker_thread_func(void *arg) {
     }
 
     if (res != XB_STREAM_READ_CHUNK) {
-      pthread_mutex_unlock(&entry->mutex);
+      entry->mutex->unlock();
       break;
     }
 
     if (chunk.type == XB_CHUNK_TYPE_EOF) {
-      pthread_mutex_lock(ctxt->mutex);
-      pthread_mutex_unlock(&entry->mutex);
-      ctxt->filehash.erase(entry->path);
+      ctxt.mutex->lock();
+      entry->mutex->unlock();
+      ctxt.filehash->erase(entry->path);
       file_entry_free(entry);
-      pthread_mutex_unlock(ctxt->mutex);
+      ctxt.mutex->unlock();
       /*
        * no need for mutex here. At this point, we are guarantee that all other
        * threads have completed its work with this file
        */
-      if (opt_decompress && ctxt->ds_ctxt->fs_support_punch_hole &&
+      if (opt_decompress && ctxt.ds_ctxt->fs_support_punch_hole &&
           (is_compressed_suffix(chunk.path) ||
            is_encrypted_and_compressed_suffix(chunk.path))) {
         char path[FN_REFLEN] = {0};
@@ -549,7 +605,7 @@ static void *extract_worker_thread_func(void *arg) {
       msg("%s: out-of-order chunk: real offset = 0x%llx, "
           "expected offset = 0x%llx\n",
           my_progname, chunk.offset, entry->offset);
-      pthread_mutex_unlock(&entry->mutex);
+      entry->mutex->unlock();
       res = XB_STREAM_READ_ERROR;
       break;
     }
@@ -557,7 +613,7 @@ static void *extract_worker_thread_func(void *arg) {
     if (chunk.type == XB_CHUNK_TYPE_PAYLOAD) {
       if (ds_write(entry->file, chunk.data, chunk.length)) {
         msg("%s: my_write() failed.\n", my_progname);
-        pthread_mutex_unlock(&entry->mutex);
+        entry->mutex->unlock();
         res = XB_STREAM_READ_ERROR;
         break;
       }
@@ -566,9 +622,9 @@ static void *extract_worker_thread_func(void *arg) {
     } else if (chunk.type == XB_CHUNK_TYPE_SPARSE) {
       if (ds_write_sparse(entry->file, chunk.data, chunk.length,
                           chunk.sparse_map_size, chunk.sparse_map,
-                          ctxt->ds_ctxt->fs_support_punch_hole)) {
+                          ctxt.ds_ctxt->fs_support_punch_hole)) {
         msg("%s: my_write() failed.\n", my_progname);
-        pthread_mutex_unlock(&entry->mutex);
+        entry->mutex->unlock();
         res = XB_STREAM_READ_ERROR;
         break;
       }
@@ -578,7 +634,7 @@ static void *extract_worker_thread_func(void *arg) {
       entry->offset += chunk.length;
     }
 
-    pthread_mutex_unlock(&entry->mutex);
+    entry->mutex->unlock();
   }
 
   my_free(chunk.raw_data);
@@ -586,12 +642,11 @@ static void *extract_worker_thread_func(void *arg) {
 
   my_thread_end();
 
-  return (void *)(res);
+  if (res == XB_STREAM_READ_ERROR) ctxt.has_errors->store(res);
 }
 
 static int mode_extract(int n_threads, int argc __attribute__((unused)),
                         char **argv __attribute__((unused))) {
-  xb_rstream_t *stream = NULL;
   ds_ctxt_t *ds_ctxt = NULL;
   ds_ctxt_t *ds_decrypt_lz4_ctxt = NULL;
   ds_ctxt_t *ds_decrypt_zstd_ctxt = NULL;
@@ -600,17 +655,16 @@ static int mode_extract(int n_threads, int argc __attribute__((unused)),
   ds_ctxt_t *ds_decompress_quicklz_ctxt = NULL;
   ds_ctxt_t *ds_decompress_lz4_ctxt = NULL;
   ds_ctxt_t *ds_decompress_zstd_ctxt = NULL;
-  extract_ctxt_t ctxt;
+  extract_ctxt_t *data_threads = NULL;
+  std::list<xb_rstream_t *> *streams = new std::list<xb_rstream_t *>();
+  xb_rstream_t *stream = NULL;
+  std::atomic<bool> has_errors{false};
+  std::vector<std::thread> threads;
+  std::unordered_map<std::string, file_entry_t *> *filehash =
+      new std::unordered_map<std::string, file_entry_t *>();
   int i;
-  pthread_t *tids = NULL;
-  void **retvals = NULL;
-  pthread_mutex_t mutex;
+  std::mutex mutex;
   int ret = 0;
-
-  if (pthread_mutex_init(&mutex, NULL)) {
-    msg("%s: failed to initialize mutex.\n", my_progname);
-    return 1;
-  }
 
   /* If --directory is specified, it is already set as CWD by now. */
   ds_ctxt = ds_create(".", DS_TYPE_LOCAL);
@@ -668,46 +722,69 @@ static int mode_extract(int n_threads, int argc __attribute__((unused)),
       ds_set_pipe(ds_decrypt_zstd_ctxt, ds_decompress_zstd_ctxt);
     }
   }
-
-  stream = xb_stream_read_new();
-  if (stream == NULL) {
-    msg("%s: xb_stream_read_new() failed.\n", my_progname);
-    pthread_mutex_destroy(&mutex);
-    ret = 1;
-    goto exit;
-  }
-
-  ctxt.stream = stream;
-  ctxt.ds_ctxt = ds_ctxt;
-  ctxt.ds_decompress_quicklz_ctxt = ds_decompress_quicklz_ctxt;
-  ctxt.ds_decompress_lz4_ctxt = ds_decompress_lz4_ctxt;
-  ctxt.ds_decompress_zstd_ctxt = ds_decompress_zstd_ctxt;
-  ctxt.ds_decrypt_uncompressed_ctxt = ds_decrypt_uncompressed_ctxt;
-  ctxt.ds_decrypt_quicklz_ctxt = ds_decrypt_quicklz_ctxt;
-  ctxt.ds_decrypt_lz4_ctxt = ds_decrypt_lz4_ctxt;
-  ctxt.ds_decrypt_zstd_ctxt = ds_decrypt_zstd_ctxt;
-  ctxt.mutex = &mutex;
-
-  tids = new pthread_t[n_threads];
-  retvals = new void *[n_threads];
-
-  for (i = 0; i < n_threads; i++)
-    pthread_create(tids + i, NULL, extract_worker_thread_func, &ctxt);
-
-  for (i = 0; i < n_threads; i++) pthread_join(tids[i], retvals + i);
-
-  for (i = 0; i < n_threads; i++) {
-    if ((ulong)retvals[i] == XB_STREAM_READ_ERROR) {
+  if (opt_fifo_streams > 1) {
+    for (int idx = 0; idx < opt_fifo_streams; idx++) {
+      char filename[FN_REFLEN];
+      snprintf(filename, sizeof(filename), "%s%s%lu", opt_fifo_dir, "/thread_",
+               (ulong)idx);
+      stream = xb_stream_read_new_fifo(filename, opt_fifo_timeout);
+      if (stream == nullptr) {
+        msg_ts(
+            "%s: xb_stream_read_new_fifo() failed for thread %d. Possibly "
+            "sender "
+            "did "
+            "not start.\n",
+            my_progname, idx);
+        ret = 1;
+        goto exit;
+      }
+      streams->push_back(stream);
+    }
+  } else {
+    stream = xb_stream_read_new_stdin();
+    if (stream == NULL) {
+      msg("%s: xb_stream_read_new_stdin() failed.\n", my_progname);
       ret = 1;
       goto exit;
     }
+    streams->push_back(stream);
   }
 
-exit:
-  pthread_mutex_destroy(&mutex);
+  data_threads = (extract_ctxt_t *)my_malloc(
+      PSI_NOT_INSTRUMENTED, sizeof(extract_ctxt_t) * (n_threads + 1),
+      MYF(MY_FAE));
+  for (int i = 0; i < n_threads; i++) {
+    data_threads[i].thread_id = i;
+    data_threads[i].filehash = filehash;
+    data_threads[i].ds_ctxt = ds_ctxt;
+    data_threads[i].ds_decompress_quicklz_ctxt = ds_decompress_quicklz_ctxt;
+    data_threads[i].ds_decompress_lz4_ctxt = ds_decompress_lz4_ctxt;
+    data_threads[i].ds_decompress_zstd_ctxt = ds_decompress_zstd_ctxt;
+    data_threads[i].ds_decrypt_uncompressed_ctxt = ds_decrypt_uncompressed_ctxt;
+    data_threads[i].ds_decrypt_quicklz_ctxt = ds_decrypt_quicklz_ctxt;
+    data_threads[i].ds_decrypt_lz4_ctxt = ds_decrypt_lz4_ctxt;
+    data_threads[i].ds_decrypt_zstd_ctxt = ds_decrypt_zstd_ctxt;
+    data_threads[i].mutex = &mutex;
+    data_threads[i].has_errors = &has_errors;
+    data_threads[i].streams = streams;
 
-  delete[] tids;
-  delete[] retvals;
+    threads.push_back(
+        std::thread(extract_worker_thread_func, std::ref(data_threads[i])));
+  }
+
+  for (i = 0; i < n_threads; i++) threads.at(i).join();
+
+  if (has_errors.load()) ret = 1;
+
+exit:
+
+  for (uint i = 0; i < (uint)n_threads; i++) {
+    char filename[FN_REFLEN];
+    snprintf(filename, sizeof(filename), "%s%s%lu", opt_fifo_dir, "/thread_",
+             (ulong)i);
+    unlink(filename);
+  }
+  delete filehash;
 
   if (ds_ctxt != NULL) {
     ds_destroy(ds_ctxt);
@@ -733,8 +810,14 @@ exit:
   if (ds_decompress_quicklz_ctxt != NULL) {
     ds_destroy(ds_decompress_quicklz_ctxt);
   }
-  xb_stream_read_done(stream);
 
+  if (data_threads != nullptr) {
+    my_free(data_threads);
+  }
+
+  std::for_each(streams->begin(), streams->end(),
+                [](xb_rstream_t *s) { xb_stream_read_done(s); });
+  delete streams;
   if (ret) {
     msg("exit code: %d\n", ret);
   }
