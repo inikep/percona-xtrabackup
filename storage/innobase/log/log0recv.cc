@@ -724,8 +724,12 @@ with regards to the epoch_no it has stored in its header, during the recovery.
 @param[in]  log_block_epoch_no  epoch_no of the log data block to check
 @param[in]  last_epoch_no       epoch_no of the last data block scanned
 @return true iff the provided log block has valid epoch_no */
-static bool log_block_epoch_no_is_valid(uint32_t log_block_epoch_no,
-                                        uint32_t last_epoch_no) {
+#ifndef XTRABACKUP
+static
+#endif /* XTRABACKUP */
+    bool
+    log_block_epoch_no_is_valid(uint32_t log_block_epoch_no,
+                                uint32_t last_epoch_no) {
   const auto expected_next_epoch_no = last_epoch_no + 1;
 
   return log_block_epoch_no == last_epoch_no ||
@@ -973,18 +977,6 @@ dberr_t recv_verify_log_is_clean_pre_8_0_30(log_t &log) {
   return DB_SUCCESS;
 }
 
-/** Describes location of a single checkpoint. */
-struct Log_checkpoint_location {
-  /** File containing checkpoint header and checkpoint lsn. */
-  Log_file_id m_checkpoint_file_id{0};
-
-  /** Checkpoint header number. */
-  Log_checkpoint_header_no m_checkpoint_header_no{};
-
-  /** Checkpoint LSN. */
-  lsn_t m_checkpoint_lsn{0};
-};
-
 /** Find the latest checkpoint in the given log file.
 @param[in]      file_handle     handle for the opened redo log file
 @param[out]     checkpoint      the latest checkpoint found (if any)
@@ -1029,8 +1021,11 @@ struct Log_checkpoint_location {
 @param[in,out]  log             redo log
 @param[out]     checkpoint      the latest checkpoint found (if any)
 @return true iff any checkpoint has been found */
-static bool recv_find_max_checkpoint(log_t &log,
-                                     Log_checkpoint_location &checkpoint) {
+#ifndef XTRABACKUP
+static
+#endif /*XTRABACKUP */
+    bool
+    recv_find_max_checkpoint(log_t &log, Log_checkpoint_location &checkpoint) {
   bool found = false;
   checkpoint = {};
 
