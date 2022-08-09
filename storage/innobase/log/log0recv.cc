@@ -724,8 +724,12 @@ with regards to the epoch_no it has stored in its header, during the recovery.
 @param[in]  log_block_epoch_no  epoch_no of the log data block to check
 @param[in]  last_epoch_no       epoch_no of the last data block scanned
 @return true iff the provided log block has valid epoch_no */
-static bool log_block_epoch_no_is_valid(uint32_t log_block_epoch_no,
-                                        uint32_t last_epoch_no) {
+#ifndef XTRABACKUP
+static
+#endif /* XTRABACKUP */
+    bool
+    log_block_epoch_no_is_valid(uint32_t log_block_epoch_no,
+                                uint32_t last_epoch_no) {
   const auto expected_next_epoch_no = last_epoch_no + 1;
 
   return log_block_epoch_no == last_epoch_no ||

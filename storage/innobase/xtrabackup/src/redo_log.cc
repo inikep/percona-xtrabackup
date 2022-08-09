@@ -1,5 +1,5 @@
 /******************************************************
-Copyright (c) 2019 Percona LLC and/or its affiliates.
+Copyright (c) 2019,2022 Percona LLC and/or its affiliates.
 
 Redo log handling.
 
@@ -49,6 +49,58 @@ Redo_Log_Reader::Redo_Log_Reader() {
 }
 
 bool Redo_Log_Reader::find_start_checkpoint_lsn() {
+  /* Look for the latest checkpoint */
+  Log_checkpoint_location checkpoint;
+
+  if (!recv_find_max_checkpoint(*log_sys, checkpoint)) {
+    xb::error() << "recv_find_max_checkpoint() failed.";
+    return (false);
+  }
+
+  /*XB30 --- Reread from header file to ensure we have read the correct value.
+   * because server might be writting when we try to read this
+
+  log_files_header_read(*log_sys, max_cp_field);
+  log_detected_format = log_sys->m_format;
+
+  checkpoint_lsn_start =
+      mach_read_from_8(log_sys->checkpoint_buf + LOG_CHECKPOINT_LSN);
+
+  while (true) {
+    err = fil_redo_io(IORequest(IORequest::LOG | IORequest::READ),
+                      page_id_t(log_sys->files_space_id, 0), univ_page_size, 0,
+                      LOG_FILE_HDR_SIZE, log_hdr_buf);
+
+    if (err != DB_SUCCESS) {
+      xb::error() << "fil_redo_io() failed.";
+
+      return (false);
+    }
+
+    err = recv_find_max_checkpoint(*log_sys, &max_cp_field);
+
+    if (err != DB_SUCCESS) {
+      xb::error() << "recv_find_max_checkpoint() failed.";
+      return (false);
+    }
+
+    log_files_header_read(*log_sys, max_cp_field);
+
+    if (checkpoint_lsn_start !=
+        mach_read_from_8(log_sys->checkpoint_buf + LOG_CHECKPOINT_LSN)) {
+      checkpoint_lsn_start =
+          mach_read_from_8(log_sys->checkpoint_buf + LOG_CHECKPOINT_LSN);
+      continue;
+    }
+
+    break;
+  }
+
+  */
+
+  log_scanned_lsn = checkpoint.m_checkpoint_lsn;
+  checkpoint_lsn_start = checkpoint.m_checkpoint_lsn;
+
   return (true);
 }
 
@@ -66,16 +118,121 @@ lsn_t Redo_Log_Reader::get_start_checkpoint_lsn() const {
   return (checkpoint_lsn_start);
 }
 
-void Redo_Log_Reader::read_log_seg(log_t &log, byte *buf, lsn_t start_lsn,
-                                   lsn_t end_lsn) {
+/* scan redo log files form server directory and update log.m_files */
+static bool reopen_log_files() {
+  log_t &log = *log_sys;
+  Log_files_context log_files_ctx =
+      Log_files_context{srv_log_group_home_dir, Log_files_ruleset::CURRENT};
+
+  std::string subdir_path;
+  bool found_files_in_subdir{false};
+  auto err = log_sys_check_directory(log_files_ctx, subdir_path,
+                                     found_files_in_subdir);
+  log.m_files_ctx = std::move(log_files_ctx);
+
+  Log_files_dict files{log.m_files_ctx};
+  Log_format format;
+  std::string creator_name;
+  Log_flags log_flags;
+  Log_uuid log_uuid;
+
+  auto res = log_files_find_and_analyze(
+      srv_read_only_mode, log.m_encryption_metadata, files, format,
+      creator_name, log_flags, log_uuid);
+
+  ut_a(res == Log_files_find_result::FOUND_VALID_FILES);
+
+  log.m_format = format;
+  log.m_creator_name = creator_name;
+  log.m_log_flags = log_flags;
+  log.m_log_uuid = log_uuid;
+  log.m_files = std::move(files);
+
+  if (err != DB_SUCCESS) {
+    ut_ad(0);
+  }
+  return true;
+}
+
+lsn_t Redo_Log_Reader::read_log_seg(log_t &log, byte *buf, lsn_t start_lsn,
+                                    lsn_t end_lsn) {
+  ut_a(start_lsn < end_lsn);
+
+  // update the in-memory structure log files by scanning
+  if (log.m_files.find(start_lsn) == log.m_files.end() ||
+      log.m_files.find(end_lsn) == log.m_files.end()) {
+    reopen_log_files();
+  }
+
+  auto file = log.m_files.find(start_lsn);
+  if (file == log.m_files.end()) {
+    return start_lsn;
+  }
+
+  auto file_handle = file->open(Log_file_access_mode::READ_ONLY);
+
+  ut_a(file_handle.is_open());
+
+  do {
+    os_offset_t source_offset;
+
+    source_offset = file->offset(start_lsn);
+
+    ut_a(end_lsn - start_lsn <= ULINT_MAX);
+
+    os_offset_t len = end_lsn - start_lsn;
+
+    ut_ad(len != 0);
+
+    bool switch_to_next_file = false;
+
+    if (source_offset + len > file->m_size_in_bytes) {
+      /* If the above condition is true then len
+      (which is unsigned) is > the expression below,
+      so the typecast is ok */
+      ut_a(file->m_size_in_bytes > source_offset);
+      len = file->m_size_in_bytes - source_offset;
+      switch_to_next_file = true;
+    }
+
+    ++log.n_log_ios;
+
+    const dberr_t err =
+        log_data_blocks_read(file_handle, source_offset, len, buf);
+    ut_a(err == DB_SUCCESS);
+
+    start_lsn += len;
+    buf += len;
+
+    if (switch_to_next_file) {
+      auto next_id = file->next_id();
+
+      const auto next_file = log.m_files.file(next_id);
+
+      if (next_file == log.m_files.end() || !next_file->contains(start_lsn)) {
+        return start_lsn;
+      }
+
+      file_handle.close();
+
+      file = next_file;
+
+      file_handle = file->open(Log_file_access_mode::READ_ONLY);
+      ut_a(file_handle.is_open());
+    }
+
+  } while (start_lsn != end_lsn);
+
+  ut_a(start_lsn == end_lsn);
+
+  return end_lsn;
 }
 
 ssize_t Redo_Log_Reader::read_logfile(bool is_last, bool *finished) {
   log_t &log = *log_sys;
 
-  lsn_t contiguous_lsn =
+  lsn_t start_lsn =
       ut_uint64_align_down(log_scanned_lsn, OS_FILE_LOG_BLOCK_SIZE);
-  lsn_t start_lsn = contiguous_lsn;
   lsn_t scanned_lsn = start_lsn;
 
   size_t len = 0;
@@ -83,13 +240,14 @@ ssize_t Redo_Log_Reader::read_logfile(bool is_last, bool *finished) {
   *finished = false;
 
   while (!*finished && len <= redo_log_read_buffer_size - RECV_SCAN_SIZE) {
-    lsn_t end_lsn = start_lsn + RECV_SCAN_SIZE;
+    const lsn_t end_lsn =
+        read_log_seg(log, log_buf + len, start_lsn, start_lsn + RECV_SCAN_SIZE);
 
-    read_log_seg(log, log_buf + len, start_lsn, end_lsn);
-
-    auto size =
-        scan_log_recs(log_buf + len, is_last, start_lsn, &contiguous_lsn,
-                      &scanned_lsn, log_scanned_lsn, finished);
+    auto size = scan_log_recs(log_buf + len, is_last, start_lsn, &scanned_lsn,
+                              log_scanned_lsn, finished);
+    if (end_lsn == start_lsn) {
+      break;
+    }
 
     if (size < 0) {
       xb::error() << "read_logfile() failed.";
@@ -106,12 +264,74 @@ ssize_t Redo_Log_Reader::read_logfile(bool is_last, bool *finished) {
 }
 
 ssize_t Redo_Log_Reader::scan_log_recs(byte *buf, bool is_last, lsn_t start_lsn,
-                                       lsn_t *contiguous_lsn,
                                        lsn_t *read_upto_lsn,
                                        lsn_t checkpoint_lsn, bool *finished) {
   lsn_t scanned_lsn{start_lsn};
+  const byte *log_block{buf};
 
   *finished = false;
+
+  ulint scanned_epoch_no{0};
+
+  while (log_block < buf + RECV_SCAN_SIZE && !*finished) {
+    Log_data_block_header block_header;
+    log_data_block_header_deserialize(log_block, block_header);
+
+    const uint32_t expected_hdr_no =
+        log_block_convert_lsn_to_hdr_no(scanned_lsn);
+
+    auto checksum_is_ok = log_block_checksum_is_ok(log_block);
+
+    if (block_header.m_hdr_no != expected_hdr_no && checksum_is_ok) {
+      /* old log block, do nothing */
+      if (block_header.m_hdr_no < expected_hdr_no) {
+        *finished = true;
+        break;
+      }
+      xb::error() << "log block numbers mismatch:";
+      xb::error() << "expected log block no. " << expected_hdr_no
+                  << ", but got no. " << block_header.m_hdr_no
+                  << " from the log file.";
+
+      return (-1);
+
+    } else if (!checksum_is_ok) {
+      /* Garbage or an incompletely written log block */
+      xb::warn() << "Log block checksum mismatch (block no "
+                 << block_header.m_hdr_no << " at lsn " << scanned_lsn
+                 << "): expected " << log_block_get_checksum(log_block)
+                 << ", calculated checksum "
+                 << log_block_calc_checksum(log_block)
+                 << " block epoch no: " << block_header.m_epoch_no;
+      xb::warn() << "this is possible when the "
+                    "log block has not been fully written by the "
+                    "server, will retry later.";
+      *finished = true;
+      break;
+    }
+
+    if (scanned_epoch_no > 0 &&
+        !log_block_epoch_no_is_valid(block_header.m_epoch_no,
+                                     scanned_epoch_no)) {
+      /* Garbage from a log buffer flush which was made
+      before the most recent database recovery */
+
+      *finished = true;
+      break;
+    }
+    const auto data_len = log_block_get_data_len(log_block);
+
+    scanned_lsn = scanned_lsn + data_len;
+    scanned_epoch_no = block_header.m_epoch_no;
+
+    if (data_len < OS_FILE_LOG_BLOCK_SIZE) {
+      /* Log data for this group ends here */
+
+      *finished = true;
+    } else {
+      log_block += OS_FILE_LOG_BLOCK_SIZE;
+    }
+  }
 
   *read_upto_lsn = scanned_lsn;
 
@@ -138,15 +358,15 @@ bool Redo_Log_Parser::parse_log(const byte *buf, size_t len, lsn_t start_lsn) {
   bool more_data = false;
 
   do {
+    Log_data_block_header block_header;
+    log_data_block_header_deserialize(log_block, block_header);
     ulint data_len = log_block_get_data_len(log_block);
 
-    if (!recv_sys->parse_start_lsn &&
-        log_block_get_first_rec_group(log_block) > 0) {
+    if (!recv_sys->parse_start_lsn && block_header.m_first_rec_group > 0) {
       /* We found a point from which to start the parsing
       of log records */
 
-      recv_sys->parse_start_lsn =
-          scanned_lsn + log_block_get_first_rec_group(log_block);
+      recv_sys->parse_start_lsn = scanned_lsn + block_header.m_first_rec_group;
 
       xb::info() << "Starting to parse redo log at lsn = "
                  << recv_sys->parse_start_lsn;
@@ -208,6 +428,8 @@ bool Redo_Log_Parser::parse_log(const byte *buf, size_t len, lsn_t start_lsn) {
       }
 
       recv_sys->scanned_lsn = scanned_lsn;
+
+      recv_sys->scanned_epoch_no = block_header.m_epoch_no;
     }
 
     if (data_len < OS_FILE_LOG_BLOCK_SIZE) {
@@ -282,6 +504,19 @@ bool Redo_Log_Writer::close_logfile() {
 
 bool Redo_Log_Writer::write_buffer(byte *buf, size_t len) {
   byte *write_buf = buf;
+
+  if (srv_redo_log_encrypt) {
+    IORequest req_type(IORequestLogWrite);
+    fil_space_t *space = fil_space_get(dict_sys_t::s_log_space_id);
+    fil_io_set_encryption(req_type, page_id_t(space->id, 0), space);
+    Encryption encryption(req_type.encryption_algorithm());
+
+    if (!encryption.encrypt_log(buf, len, scratch_buf)) {
+      xb::error() << "Failed to encrypt redo log";
+      return false;
+    }
+    write_buf = scratch_buf;
+  }
 
   if (ds_write(log_file, write_buf, len)) {
     xb::error() << "write to logfile failed";
@@ -663,59 +898,8 @@ void Archived_Redo_Log_Monitor::thread_func() {
   my_thread_end();
 }
 
-static dberr_t open_or_create_log_file(bool *log_file_created, ulint i,
-                                       fil_space_t **log_space) {
-  bool ret;
-  os_offset_t size;
-  char name[10000];
-  ulint dirnamelen;
-
-  *log_file_created = false;
-
-  Fil_path::normalize(srv_log_group_home_dir);
-
-  dirnamelen = strlen(srv_log_group_home_dir);
-  ut_a(dirnamelen < (sizeof name) - 10 - sizeof "ib_logfile");
-  memcpy(name, srv_log_group_home_dir, dirnamelen);
-
-  /* Add a path separator if needed. */
-  if (dirnamelen && name[dirnamelen - 1] != OS_PATH_SEPARATOR) {
-    name[dirnamelen++] = OS_PATH_SEPARATOR;
-  }
-
-  sprintf(name + dirnamelen, "%s%ld", "ib_logfile", i);
-
-  pfs_os_file_t file = os_file_create(0, name, OS_FILE_OPEN, OS_FILE_NORMAL,
-                                      OS_LOG_FILE, true, &ret);
-  if (!ret) {
-    xb::error() << "error in opening " << name;
-
-    return (DB_ERROR);
-  }
-
-  size = os_file_get_size(file);
-
-  if (size != srv_log_file_size) {
-    xb::error() << "log file " << name << " is of different size " << size
-                << " bytes than specified in the .cnf file "
-                << srv_log_file_size << " bytes!";
-
-    return (DB_ERROR);
-  }
-
-  ret = os_file_close(file);
-  ut_a(ret);
-
-  ut_a(*log_space != NULL);
-  ut_ad(fil_validate());
-
-  ut_a(fil_node_create(name, srv_log_file_size / univ_page_size.physical(),
-                       *log_space, false, false) != NULL);
-
-  return (DB_SUCCESS);
-}
-
 bool Redo_Log_Data_Manager::init() {
+  srv_redo_log_capacity = srv_redo_log_capacity_used = 0;
   error = true;
   event = os_event_create();
 
@@ -727,47 +911,10 @@ bool Redo_Log_Data_Manager::init() {
     return (false);
   }
 
+  ut_a(log_sys != nullptr);
+
   recv_sys_create();
   recv_sys_init();
-
-  ut_a(srv_log_n_files > 0);
-
-  bool log_file_created = false;
-  bool log_created = false;
-  bool log_opened = false;
-  fil_space_t *log_space = nullptr;
-
-  for (ulong i = 0; i < srv_log_n_files; i++) {
-    dberr_t err = open_or_create_log_file(&log_file_created, i, &log_space);
-    if (err != DB_SUCCESS) {
-      return (false);
-    }
-
-    if (log_file_created) {
-      log_created = true;
-    } else {
-      log_opened = true;
-    }
-    if ((log_opened && log_created)) {
-      xb::error() << "all log files must be created at the same time.";
-      xb::error() << "All log files must be created also in database "
-                     "creation.";
-      xb::error() << "If you want bigger or smaller log files, shut down the"
-                     "database and make sure there were no errors in shutdown.";
-      xb::error() << "Then delete the existing log files. Edit the .cnf file"
-                     "and start the database again.";
-
-      return (false);
-    }
-  }
-
-  /* log_file_created must not be true, if online */
-  if (log_file_created) {
-    xb::error() << "Something wrong with source files...";
-    exit(EXIT_FAILURE);
-  }
-
-  ut_a(log_space != nullptr);
 
   archived_log_state = ARCHIVED_LOG_NONE;
   archived_log_monitor.start();

@@ -741,6 +741,13 @@ block.
 @return whether the checksum matches */
 bool log_block_checksum_is_ok(const byte *block);
 
+/** Checks if a given log data block could be considered a next valid block,
+with regards to the epoch_no it has stored in its header, during the recovery.
+@param[in]  log_block_epoch_no  epoch_no of the log data block to check
+@param[in]  last_epoch_no       epoch_no of the last data block scanned
+@return true iff the provided log block has valid epoch_no */
+bool log_block_epoch_no_is_valid(uint32_t log_block_epoch_no,
+                                 uint32_t last_epoch_no);
 /** Describes location of a single checkpoint. */
 struct Log_checkpoint_location {
   /** File containing checkpoint header and checkpoint lsn. */
