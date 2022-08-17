@@ -4986,10 +4986,10 @@ static bool xtrabackup_init_temp_log(void) {
   }
 
   if (!xtrabackup_incremental_dir) {
-    sprintf(dst_path, "%s/ib_logfile0", xtrabackup_target_dir);
+    sprintf(dst_path, "%s/#ib_redo/ib_redo1", xtrabackup_target_dir);
     sprintf(src_path, "%s/%s", xtrabackup_target_dir, XB_LOG_FILENAME);
   } else {
-    sprintf(dst_path, "%s/ib_logfile0", xtrabackup_incremental_dir);
+    sprintf(dst_path, "%s/#ib_redo/ib_redo1", xtrabackup_incremental_dir);
     sprintf(src_path, "%s/%s", xtrabackup_incremental_dir, XB_LOG_FILENAME);
   }
 
@@ -4999,41 +4999,16 @@ retry:
   src_file = os_file_create_simple_no_error_handling(
       0, src_path, OS_FILE_OPEN, OS_FILE_READ_WRITE, srv_read_only_mode,
       &success);
-  if (!success) {
+
+  if (!success && false) {
     /* The following call prints an error message */
     os_file_get_last_error(true);
 
     xb::warn() << "cannot open " << src_path << " will try to find.";
 
-    /* check if #ib_redo0 may be xtrabackup_logfile */
-    src_file = os_file_create_simple_no_error_handling(
-        0, dst_path, OS_FILE_OPEN, OS_FILE_READ_WRITE, srv_read_only_mode,
-        &success);
-    if (!success) {
-      os_file_get_last_error(true);
-      xb::fatal_or_error(UT_LOCATION_HERE) << "cannot find " << src_path;
-
-      goto error;
-    }
-
-    success = os_file_read(read_request, dst_path, src_file, log_buf, 0,
-                           LOG_FILE_HDR_SIZE);
-    if (!success) {
-      goto error;
-    }
-
-    if (ut_memcmp(log_buf + LOG_HEADER_CREATOR, (byte *)"xtrabkup",
-                  (sizeof "xtrabkup") - 1) == 0) {
-      xb::info() << "'#ib_redo0' seems to be 'xtrabackup_logfile'. will "
-                    "retry.";
-
-      os_file_close(src_file);
-      src_file = XB_FILE_UNDEFINED;
-
-      /* rename and try again */
-      success = os_file_rename(0, dst_path, src_path);
-      if (!success) {
-        goto error;
+    if (success) {
+      if (log_buf != NULL) {
+        ut::free(log_buf);
       }
 
       goto retry;
