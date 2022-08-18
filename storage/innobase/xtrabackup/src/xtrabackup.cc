@@ -45,6 +45,8 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include <mysql_com.h>
 #include <mysql_version.h>
 #include <mysqld.h>
+#include "log0files_io.h"
+#include "log0types.h"
 #include "row0quiesce.h"
 
 #include <fcntl.h>
@@ -504,6 +506,7 @@ extern TYPELIB innodb_flush_method_typelib;
 #include "sslopt-vars.h"
 
 bool redo_catchup_completed = false;
+Log_format original_log_format;
 extern struct rand_struct sql_rand;
 extern mysql_mutex_t LOCK_sql_rand;
 
@@ -4964,6 +4967,8 @@ static bool xtrabackup_init_temp_log(void) {
   pfs_os_file_t src_file = XB_FILE_UNDEFINED;
   char src_path[FN_REFLEN];
   char dst_path[FN_REFLEN];
+  char redo_folder[FN_REFLEN];
+  MY_STAT stat_info;
   bool success;
   Log_format log_format;
   ulint field;
@@ -4972,7 +4977,8 @@ static bool xtrabackup_init_temp_log(void) {
   uint64_t file_size;
 
   lsn_t max_lsn = 0;
-  lsn_t checkpoint_lsn;
+  lsn_t checkpoint_lsn = 0;
+  lsn_t start_lsn = 0;
 
   bool checkpoint_found;
 
@@ -4986,11 +4992,23 @@ static bool xtrabackup_init_temp_log(void) {
   }
 
   if (!xtrabackup_incremental_dir) {
-    sprintf(dst_path, "%s/#ib_redo/ib_redo1", xtrabackup_target_dir);
+    sprintf(dst_path, "%s/%s/#ib_redo0", LOG_DIRECTORY_NAME,
+            xtrabackup_target_dir);
     sprintf(src_path, "%s/%s", xtrabackup_target_dir, XB_LOG_FILENAME);
+    sprintf(redo_folder, "%s/%s", xtrabackup_target_dir, LOG_DIRECTORY_NAME);
   } else {
-    sprintf(dst_path, "%s/#ib_redo/ib_redo1", xtrabackup_incremental_dir);
+    sprintf(dst_path, "%s/%s/#ib_redo0", xtrabackup_incremental_dir,
+            LOG_DIRECTORY_NAME);
     sprintf(src_path, "%s/%s", xtrabackup_incremental_dir, XB_LOG_FILENAME);
+    sprintf(redo_folder, "%s/%s", xtrabackup_incremental_dir,
+            LOG_DIRECTORY_NAME);
+  }
+
+  /* create #innodb_redo dir if not exist */
+  if (!my_stat(redo_folder, &stat_info, MYF(0)) &&
+      (my_mkdir(redo_folder, 0777, MYF(0)) < 0)) {
+    xb::error() << "cannot mkdir: " << my_errno() << " " << redo_folder;
+    exit(EXIT_FAILURE);
   }
 
   Fil_path::normalize(dst_path);
@@ -5090,6 +5108,14 @@ retry:
   }
 
   mach_write_to_4(log_buf + LOG_HEADER_FORMAT, to_int(log_format));
+  if (original_log_format == Log_format::VERSION_8_0_28) {
+    /* write start_lsn header */
+    start_lsn = checkpoint_lsn;
+    if (start_lsn % OS_FILE_LOG_BLOCK_SIZE != 0)
+      start_lsn = ut_uint64_align_down(checkpoint_lsn, OS_FILE_LOG_BLOCK_SIZE);
+
+    mach_write_to_8(log_buf + LOG_HEADER_START_LSN, start_lsn);
+  }
   update_log_temp_checkpoint(log_buf, max_lsn);
 
   success = os_file_write(write_request, src_path, src_file, log_buf, 0,
@@ -6044,6 +6070,7 @@ static bool xtrabackup_close_temp_log(bool clear_flag) {
   pfs_os_file_t src_file = XB_FILE_UNDEFINED;
   char src_path[FN_REFLEN];
   char dst_path[FN_REFLEN];
+  char redo_folder[FN_REFLEN];
   bool success;
   byte log_buf[UNIV_PAGE_SIZE_MAX];
   IORequest read_request(IORequest::READ);
@@ -6053,10 +6080,10 @@ static bool xtrabackup_close_temp_log(bool clear_flag) {
 
   /* rename 'ib_logfile0' to 'xtrabackup_logfile' */
   if (!xtrabackup_incremental_dir) {
-    sprintf(dst_path, "%s/ib_logfile0", xtrabackup_target_dir);
+    sprintf(dst_path, "%s/#innodb_redo/#ib_redo0", xtrabackup_target_dir);
     sprintf(src_path, "%s/%s", xtrabackup_target_dir, XB_LOG_FILENAME);
   } else {
-    sprintf(dst_path, "%s/ib_logfile0", xtrabackup_incremental_dir);
+    sprintf(dst_path, "%s/#innodb_redo/#ib_redo0", xtrabackup_incremental_dir);
     sprintf(src_path, "%s/%s", xtrabackup_incremental_dir, XB_LOG_FILENAME);
   }
 
@@ -6087,6 +6114,8 @@ static bool xtrabackup_close_temp_log(bool clear_flag) {
 
   memset(log_buf + LOG_HEADER_CREATOR, ' ', 4);
 
+  /* restore original log format */
+  mach_write_to_4(log_buf + LOG_HEADER_FORMAT, to_int(original_log_format));
   success = os_file_write(write_request, src_path, src_file, log_buf, 0,
                           LOG_FILE_HDR_SIZE);
   if (!success) {
@@ -6098,6 +6127,31 @@ static bool xtrabackup_close_temp_log(bool clear_flag) {
   innobase_log_files_in_group = innobase_log_files_in_group_save;
   srv_log_group_home_dir = srv_log_group_home_dir_save;
   innobase_log_file_size = innobase_log_file_size_save;
+
+  /* remove #innodb_redo folder */
+  if (!xtrabackup_incremental_dir) {
+    sprintf(redo_folder, "%s/%s", xtrabackup_target_dir, LOG_DIRECTORY_NAME);
+  } else {
+    sprintf(redo_folder, "%s/%s", xtrabackup_incremental_dir,
+            LOG_DIRECTORY_NAME);
+  }
+
+  /* remove #innodb_redo dir if exist */
+  if (!os_file_scan_directory(
+          redo_folder,
+          [](const char *path, const char *file_name) {
+            if (strcmp(file_name, ".") == 0 || strcmp(file_name, "..") == 0) {
+              return;
+            }
+            const auto to_remove =
+                std::string{path} + OS_PATH_SEPARATOR + file_name;
+            unlink(to_remove.c_str());
+          },
+          true)) {
+    ib::error(ER_IB_CLONE_STATUS_FILE)
+        << "Error removing directory : " << redo_folder;
+    goto error;
+  }
 
   return (false);
 error:
@@ -6906,6 +6960,8 @@ skip_check:
   /* temporally dummy value to avoid crash */
   srv_page_size_shift = 14;
   srv_page_size = (1 << srv_page_size_shift);
+  srv_redo_log_capacity = 8388608;  // min val
+  srv_redo_log_capacity_used = srv_redo_log_capacity;
   os_event_global_init();
   sync_check_init(srv_max_n_threads);
 #ifdef UNIV_DEBUG
