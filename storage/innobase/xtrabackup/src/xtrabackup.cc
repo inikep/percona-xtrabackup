@@ -4403,7 +4403,6 @@ void xtrabackup_backup_func(void) {
                << " threads for parallel data files transfer";
   }
 
-
   auto it = datafiles_iter_new();
   if (it == NULL) {
     xb::error() << "datafiles_iter_new() failed.";
@@ -4470,7 +4469,8 @@ void xtrabackup_backup_func(void) {
   if (opt_debug_sleep_before_unlock) {
     xb::info() << "Debug sleep for " << opt_debug_sleep_before_unlock
                << " seconds";
-    std::this_thread::sleep_for(std::chrono::seconds(opt_debug_sleep_before_unlock));
+    std::this_thread::sleep_for(
+        std::chrono::seconds(opt_debug_sleep_before_unlock));
   }
 
   if (!redo_mgr.stop_at(log_status.lsn, log_status.lsn_checkpoint)) {
@@ -4860,8 +4860,7 @@ static void xtrabackup_stats_func(int argc, char **argv) {
   srv_read_only_mode = true;
 
   init_mysql_environment();
-  if(!xtrabackup::components::keyring_init_offline())
-  {
+  if (!xtrabackup::components::keyring_init_offline()) {
     xb::error() << "failed to init keyring component";
     exit(EXIT_FAILURE);
   }
@@ -5036,7 +5035,7 @@ static bool xtrabackup_init_temp_log(void) {
   uint64_t file_size;
 
   lsn_t max_lsn = 0;
-  lsn_t checkpoint_lsn;
+  lsn_t checkpoint_lsn = 0;
   lsn_t start_lsn = 0;
 
   bool checkpoint_found;
@@ -5179,6 +5178,11 @@ retry:
 
     mach_write_to_8(log_buf + LOG_HEADER_START_LSN, start_lsn);
   }
+
+  /* write start_lsn header */
+  start_lsn = ut_uint64_align_down(checkpoint_lsn, OS_FILE_LOG_BLOCK_SIZE);
+  mach_write_to_8(log_buf + LOG_HEADER_START_LSN, start_lsn);
+
   update_log_temp_checkpoint(log_buf, max_lsn);
 
   success = os_file_write(write_request, src_path, src_file, log_buf, 0,
@@ -5251,14 +5255,13 @@ retry:
   innobase_log_files_in_group_save = innobase_log_files_in_group;
   srv_log_group_home_dir_save = srv_log_group_home_dir;
   innobase_log_file_size_save = innobase_log_file_size;
-
   srv_log_group_home_dir = NULL;
   innobase_log_file_size = file_size;
   innobase_log_files_in_group = 1;
 
   srv_thread_concurrency = 0;
 
-  /* rename 'xtrabackup_logfile' to 'ib_logfile0' */
+  /* rename 'xtrabackup_logfile' to '#ib_redo0' */
   success = os_file_rename(0, src_path, dst_path);
   if (!success) {
     goto error;
@@ -6138,12 +6141,14 @@ static bool xtrabackup_close_temp_log(bool clear_flag) {
 
   if (!xtrabackup_logfile_is_renamed) return (false);
 
-  /* rename 'ib_logfile0' to 'xtrabackup_logfile' */
+  /* rename '#ib_redo0' to 'xtrabackup_logfile' */
   if (!xtrabackup_incremental_dir) {
-    sprintf(dst_path, "%s/#innodb_redo/#ib_redo0", xtrabackup_target_dir);
+    sprintf(dst_path, "%s/%s/%s0", xtrabackup_target_dir, LOG_DIRECTORY_NAME,
+            LOG_FILE_BASE_NAME);
     sprintf(src_path, "%s/%s", xtrabackup_target_dir, XB_LOG_FILENAME);
   } else {
-    sprintf(dst_path, "%s/#innodb_redo/#ib_redo0", xtrabackup_incremental_dir);
+    sprintf(dst_path, "%s/%s/%s0", xtrabackup_incremental_dir,
+            LOG_DIRECTORY_NAME, LOG_FILE_BASE_NAME);
     sprintf(src_path, "%s/%s", xtrabackup_incremental_dir, XB_LOG_FILENAME);
   }
 
@@ -6243,8 +6248,7 @@ static bool xb_export_cfg_write_index_fields(
 
     mach_write_to_4(ptr, field->fixed_len);
 
-    if (cfg_version >= IB_EXPORT_CFG_VERSION_V4)
-    {
+    if (cfg_version >= IB_EXPORT_CFG_VERSION_V4) {
       ptr += sizeof(uint32_t);
       /* In IB_EXPORT_CFG_VERSION_V4 we also write the is_ascending boolean. */
       mach_write_to_4(ptr, field->is_ascending);
@@ -7980,8 +7984,7 @@ void setup_error_messages() {
   my_default_lc_messages->errmsgs->read_texts();
 }
 
-void xb_set_plugin_dir()
-{
+void xb_set_plugin_dir() {
   if (opt_xtra_plugin_dir != NULL) {
     strncpy(opt_plugin_dir, opt_xtra_plugin_dir, FN_REFLEN);
   } else {
