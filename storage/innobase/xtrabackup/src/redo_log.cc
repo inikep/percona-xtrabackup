@@ -1,5 +1,5 @@
 /******************************************************
-Copyright (c) 2019,2022 Percona LLC and/or its affiliates.
+Copyright (c) 2019,2023 Percona LLC and/or its affiliates.
 
 Redo log handling.
 
@@ -31,6 +31,7 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA
 #include "backup_mysql.h"
 #include "common.h"
 #include "file_utils.h"
+#include "log0encryption.h"
 #include "os0event.h"
 #include "sql_thd_internal_api.h"
 #include "xb0xb.h"
@@ -74,7 +75,8 @@ bool Redo_Log_Reader::find_start_checkpoint_lsn() {
     return false;
   }
 
-  log_file_header_read(file_handle, log_hdr_buf);
+  /* Copy the header into log_hdr_buf */
+  file_handle.read(0, LOG_FILE_HDR_SIZE, log_hdr_buf);
 
   log_scanned_lsn = checkpoint.m_checkpoint_lsn;
   checkpoint_lsn_start = checkpoint.m_checkpoint_lsn;
@@ -125,6 +127,7 @@ static bool reopen_log_files() {
   log.m_log_flags = log_flags;
   log.m_log_uuid = log_uuid;
   log.m_files = std::move(files);
+  log_encryption_read(log);
 
   if (err != DB_SUCCESS) {
     ut_ad(0);
@@ -480,13 +483,15 @@ bool Redo_Log_Writer::close_logfile() {
   return (true);
 }
 
+
 bool Redo_Log_Writer::write_buffer(byte *buf, size_t len) {
   byte *write_buf = buf;
 
   if (srv_redo_log_encrypt) {
-    IORequest req_type(IORequestLogWrite);
-    fil_space_t *space = fil_space_get(dict_sys_t::s_log_space_id);
-    fil_io_set_encryption(req_type, page_id_t(space->id, 0), space);
+    IORequest req_type(IORequest::WRITE);
+    req_type.get_encryption_info().set(log_sys->m_encryption_metadata);
+    ut_ad(req_type.is_encrypted());
+
     Encryption encryption(req_type.encryption_algorithm());
 
     if (!encryption.encrypt_log(buf, len, scratch_buf)) {
@@ -495,7 +500,6 @@ bool Redo_Log_Writer::write_buffer(byte *buf, size_t len) {
     }
     write_buf = scratch_buf;
   }
-
   if (ds_write(log_file, write_buf, len)) {
     xb::error() << "write to logfile failed";
     return (false);
@@ -640,12 +644,12 @@ void Archived_Redo_Log_Monitor::skip_for_block(lsn_t lsn,
       switch to archive if the data length of blocks is different. This can
       happen when the last block is partially filled in redolog and when it
       reaches the archive file, the same block could be filled more */
-      if (redo_block_no == arch_block_no &&
-          (redo_block_checksum == arch_block_checksum ||
-           redo_block_len != arch_block_len)) {
-        xb::info() << "Archived redo log has caught up";
-        reader.set_start_lsn(lsn - bytes_read);
-        return;
+  if (redo_block_no == arch_block_no &&
+      (redo_block_checksum == arch_block_checksum ||
+       redo_block_len != arch_block_len)) {
+    xb::info() << "Archived redo log has caught up";
+    reader.set_start_lsn(lsn - bytes_read);
+    return;
       }
     }
     if (finished) {
@@ -889,10 +893,21 @@ bool Redo_Log_Data_Manager::init() {
     return (false);
   }
 
+  Log_checkpoint_location checkpoint;
+  if (!recv_find_max_checkpoint(*log_sys, checkpoint)) {
+    xb::error() << " recv_find_max_checkpoint() failed.";
+    return (false);
+  }
+  auto file = log_sys->m_files.find(checkpoint.m_checkpoint_lsn);
+
+  log_encryption_read(*log_sys, *file);
+
   ut_a(log_sys != nullptr);
 
   recv_sys_create();
   recv_sys_init();
+
+  ut_a(log_sys != nullptr);
 
   archived_log_state = ARCHIVED_LOG_NONE;
   archived_log_monitor.start();
