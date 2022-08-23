@@ -4412,7 +4412,7 @@ void xtrabackup_backup_func(void) {
       break;
     }
     if (redo_mgr.is_error()) {
-      xb::error() << "log copyiing failed.";
+      xb::error() << "log copying failed.";
       exit(EXIT_FAILURE);
     }
     mutex_exit(&count_mutex);
@@ -4438,6 +4438,7 @@ void xtrabackup_backup_func(void) {
   }
 
   Backup_context backup_ctxt;
+  backup_ctxt.redo_mgr = &redo_mgr;
   if (!backup_start(backup_ctxt)) {
     exit(EXIT_FAILURE);
   }
@@ -4449,11 +4450,13 @@ void xtrabackup_backup_func(void) {
         std::chrono::seconds(opt_debug_sleep_before_unlock));
   }
 
-  if (!redo_mgr.stop_at(log_status.lsn, log_status.lsn_checkpoint)) {
+  if (redo_mgr.is_error()) {
+    xb::error() << "log copying failed.";
     exit(EXIT_FAILURE);
   }
-  if (redo_mgr.is_error()) {
-    xb::error() << "log copyiing failed.";
+
+  if (!redo_mgr.stop_at(log_status.lsn, log_status.lsn_checkpoint)) {
+    xb::error() << "Error stopping copy thread at LSN " << log_status.lsn;
     exit(EXIT_FAILURE);
   }
 
@@ -5141,17 +5144,9 @@ retry:
   }
 
   mach_write_to_4(log_buf + LOG_HEADER_FORMAT, to_int(log_format));
-  if (original_log_format == Log_format::VERSION_8_0_28) {
-    /* write start_lsn header */
-    start_lsn = checkpoint_lsn;
-    if (start_lsn % OS_FILE_LOG_BLOCK_SIZE != 0)
-      start_lsn = ut_uint64_align_down(checkpoint_lsn, OS_FILE_LOG_BLOCK_SIZE);
-
-    mach_write_to_8(log_buf + LOG_HEADER_START_LSN, start_lsn);
-  }
 
   /* write start_lsn header */
-  start_lsn = ut_uint64_align_down(checkpoint_lsn, OS_FILE_LOG_BLOCK_SIZE);
+  start_lsn = ut_uint64_align_down(max_lsn, OS_FILE_LOG_BLOCK_SIZE);
   mach_write_to_8(log_buf + LOG_HEADER_START_LSN, start_lsn);
 
   update_log_temp_checkpoint(log_buf, max_lsn);
@@ -6183,7 +6178,7 @@ static bool xtrabackup_close_temp_log(bool clear_flag) {
                 std::string{path} + OS_PATH_SEPARATOR + file_name;
             unlink(to_remove.c_str());
           },
-          true)) {
+          false)) {
     ib::error(ER_IB_CLONE_STATUS_FILE)
         << "Error removing directory : " << redo_folder;
     goto error;
