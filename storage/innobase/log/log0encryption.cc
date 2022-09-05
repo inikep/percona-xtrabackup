@@ -66,6 +66,18 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA
 /* IB_mutex_guard */
 #include "ut0mutex.h"
 
+#ifdef XTRABACKUP
+/* use_dumped_tablespace_key */
+#include "xb0xb.h"
+
+/* s_log_space_id */
+#include "dict0dict.h"
+
+/* xb_save_redo_encryption_key */
+#include "xtrabackup/src/keyring_plugins.h"
+
+#endif /* XTRABACKUP */
+
 /**************************************************/ /**
 
  @name Log - encryption.
@@ -111,6 +123,28 @@ dberr_t log_encryption_read(log_t &log, const Log_file &file) {
 
   if (Encryption::is_encrypted_with_v3(log_block_buf +
                                        LOG_HEADER_ENCRYPTION_INFO_OFFSET)) {
+#ifdef XTRABACKUP
+    if (use_dumped_tablespace_keys && !srv_backup_mode) {
+      Encryption_metadata e_m;
+      bool success = xb_load_saved_redo_encryption(e_m);
+      if (!success) {
+        xb::error() << "Cannot find encryption key for redo log from dumped "
+                       "tablespace keys";
+        return DB_ERROR;
+      }
+      log_files_update_encryption(log, e_m);
+      // TODO: is this required? Since the key & iv are from dumped_file, we
+      // cannot write the same block as is. We have to recreate the header lock
+      // with the new key&iv Currently this saved buffer is used only on
+      // checkpoints and when checkpoint moves to new redo file. Will this
+      // happen in PXB?
+      // std::memcpy(log.m_encryption_buf, log_block_buf,
+      // OS_FILE_LOG_BLOCK_SIZE);
+      return DB_SUCCESS;
+    }
+    /* check_keyring modifies keyring by generating new key and saving it.
+      XtraBackup must avoid touching keyring on backup. */
+#else
     /* Make sure the keyring is loaded. */
     if (!Encryption::check_keyring()) {
       ib::error(ER_IB_MSG_1238) << "Redo log was encrypted,"
@@ -130,6 +164,9 @@ dberr_t log_encryption_read(log_t &log, const Log_file &file) {
                                << " metadata successful.";
 
       std::memcpy(log.m_encryption_buf, log_block_buf, OS_FILE_LOG_BLOCK_SIZE);
+
+      // save the redo log key for use with transition key
+      xb_save_redo_encryption_key(encryption_metadata);
 
       return DB_SUCCESS;
 
