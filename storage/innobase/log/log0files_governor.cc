@@ -875,6 +875,13 @@ static bool might_recycle_file(const log_t &log, os_offset_t removed_file_size,
 
 static bool might_create_unused_file(const log_t &log,
                                      os_offset_t unused_file_size) {
+#ifdef XTRABACKUP
+  /* We avoid unused redo file (#ib_redo*_tmp) creation (32 * 32M files, total
+  1G capacity used for rollback of transaction at final prepare) and create redo
+  files on demand. See log_files_produce_file() */
+  return false;
+#endif
+
   return number_of_files_allows_to_create(log) &&
          physical_capacity_allows_to_create(log, unused_file_size);
 }
