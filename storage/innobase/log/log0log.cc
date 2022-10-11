@@ -1578,6 +1578,13 @@ static dberr_t log_sys_handle_creator(log_t &log) {
     }
     ib::info(ER_IB_MSG_LOG_FILES_CREATED_BY_CLONE);
 
+  } else if (str_starts_with(creator_name, LOG_HEADER_CREATOR_PXB)) {
+
+    if (srv_read_only_mode) {
+      ib::error() << "Cannot restore from xtrabackup, InnoDB running in "
+                     "read-only mode!";
+      return DB_ERROR;
+    }
   } else if (!str_starts_with(creator_name, "MySQL ")) {
     ib::warn(ER_IB_MSG_LOG_FILES_CREATED_BY_UNKNOWN_CREATOR,
              creator_name.c_str());
@@ -1668,7 +1675,8 @@ dberr_t log_sys_init(bool expect_no_files, lsn_t flushed_lsn,
   Log_file_handle::s_on_before_read = [](Log_file_id, Log_file_type file_type,
                                          os_offset_t, os_offset_t read_size) {
     ut_a(file_type == Log_file_type::NORMAL);
-    ut_a(srv_is_being_started);
+    ut_a(srv_is_being_started ||
+         srv_shutdown_state.load() == SRV_SHUTDOWN_EXIT_THREADS);
 #ifndef UNIV_HOTBACKUP
     srv_stats.data_read.add(read_size);
 #endif /* !UNIV_HOTBACKUP */
