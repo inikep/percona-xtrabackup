@@ -208,6 +208,13 @@ constexpr os_offset_t LOG_HEADER_ENCRYPTION_INFO_OFFSET =
 /** Header is created during DB clone */
 #define LOG_HEADER_CREATOR_CLONE "MySQL Clone"
 
+#ifdef XTRABACKUP
+/** Redo log created by PXB during backup */
+#define LOG_HEADER_CREATOR_PXB "xtrabkup"
+/* Redo log created by PXB during full prepare (without --apply-log-only) */
+#define LOG_HEADER_CREATOR_PXB_PREPARE "xb_prepare"
+#endif
+
 /** 32 BITs flag */
 constexpr os_offset_t LOG_HEADER_FLAGS = LOG_HEADER_CREATOR_END;
 
