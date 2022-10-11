@@ -514,6 +514,7 @@ bool redo_catchup_completed = false;
 Log_format original_log_format;
 extern struct rand_struct sql_rand;
 extern mysql_mutex_t LOCK_sql_rand;
+bool xb_generated_redo = false;
 
 static void check_all_privileges();
 static bool validate_options(const char *file, int argc, char **argv);
@@ -2610,6 +2611,14 @@ static bool innodb_init(bool init_dd, bool for_apply_log) {
       to_lsn = incremental_last_lsn < incremental_to_lsn ? incremental_to_lsn
                                                          : incremental_last_lsn;
     }
+  }
+
+  /* If pxb created redo log files (final prepare), the LSNs will be out of
+  backup end_LSN. So we cannot use this LSN to verify that if we have applied
+  to the target end_LSN (to_lsn). Unset it and let it apply to last recorded
+  redo LSN in new redo files */
+  if (xb_generated_redo && xtrabackup_incremental_dir == nullptr) {
+    to_lsn = LSN_MAX;
   }
 
   err = srv_start(false, to_lsn);
@@ -5084,7 +5093,7 @@ static bool xtrabackup_init_temp_log(void) {
 
   Fil_path::normalize(dst_path);
   Fil_path::normalize(src_path);
-retry:
+
   src_file = os_file_create_simple_no_error_handling(
       0, src_path, OS_FILE_OPEN, OS_FILE_READ_WRITE, srv_read_only_mode,
       &success);
@@ -5103,8 +5112,7 @@ retry:
       if (log_buf != NULL) {
         ut::free(log_buf);
       }
-
-      goto retry;
+      return false;
     }
 
     xb::fatal_or_error(UT_LOCATION_HERE) << "cannot find " << src_path;
@@ -5117,9 +5125,6 @@ retry:
 
   file_size = os_file_get_size(src_file);
 
-  /* TODO: We should skip the following modifies, if it is not the first time.
-   */
-
   /* read log file header */
   success = os_file_read(read_request, dst_path, src_file, log_buf, 0,
                          LOG_FILE_HDR_SIZE);
@@ -5130,8 +5135,8 @@ retry:
   log_format = (Log_format)mach_read_from_4(log_buf + LOG_HEADER_FORMAT);
   log_detected_format = log_format;
 
-  if (ut_memcmp(log_buf + LOG_HEADER_CREATOR, (byte *)"xtrabkup",
-                (sizeof "xtrabkup") - 1) != 0) {
+  if (ut_memcmp(log_buf + LOG_HEADER_CREATOR, (byte *)LOG_HEADER_CREATOR_PXB,
+                (sizeof LOG_HEADER_CREATOR_PXB) - 1) != 0) {
     if (xtrabackup_incremental_dir) {
       xb::error() << "xtrabackup_logfile was already used "
                      "to '--prepare'.";
@@ -6226,17 +6231,25 @@ redo directory
 @return true if any error occured or false  */
 static bool xtrabackup_close_temp_log(bool clear_flag) {
   char redo_folder[FN_REFLEN];
-  Log_files_context log_files_ctx;
+  const char *backup_dir = !xtrabackup_incremental_dir
+                               ? xtrabackup_target_dir
+                               : xtrabackup_incremental_dir;
 
-  if (!xtrabackup_incremental_dir) {
-    log_files_ctx =
-        Log_files_context{xtrabackup_target_dir, Log_files_ruleset::CURRENT};
-    sprintf(redo_folder, "%s/%s", xtrabackup_target_dir, LOG_DIRECTORY_NAME);
-  } else {
-    log_files_ctx = Log_files_context{xtrabackup_incremental_dir,
-                                      Log_files_ruleset::CURRENT};
-    sprintf(redo_folder, "%s/%s", xtrabackup_incremental_dir,
-            LOG_DIRECTORY_NAME);
+  Log_files_context log_files_ctx =
+      Log_files_context{backup_dir, Log_files_ruleset::CURRENT};
+  sprintf(redo_folder, "%s/%s", backup_dir, LOG_DIRECTORY_NAME);
+
+  bool valid = xb_log_files_validate_creators(backup_dir);
+
+  if (!valid) {
+    xb::error()
+        << "Unable to validate the redo log files at the end of prepare";
+    return (true);
+  }
+
+  if (xb_generated_redo && !clear_flag) {
+    xb::info() << "prepare generated new redo log files. Skipping rename. ";
+    return (false);
   }
 
   if (xtrabackup_logfile_is_renamed) {
