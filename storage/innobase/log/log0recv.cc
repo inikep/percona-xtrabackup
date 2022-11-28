@@ -105,8 +105,14 @@ rolling back incomplete transactions. */
 volatile bool recv_recovery_on;
 volatile lsn_t backup_redo_log_flushed_lsn;
 #ifdef XTRABACKUP
-/** map of space_id, that would be full scan during backup with pagetracking */
-std::map<space_id_t, bool> full_scan_tables;
+/* List of tablespaces that should be copied fully. Even if page tracking is
+active, the tablespaces in this list will be fully copied to backup directory.
+This set is populated by the redo first scan phase (by a single thread) and
+after the initial parsing is over, we only use it for reads. Hence, it is not
+required to protect with mutex. */
+std::unordered_set<space_id_t> full_scan_tables;
+
+size_t full_scan_tables_count = 0;
 #endif /* XTRABACKUP */
 
 #ifdef UNIV_HOTBACKUP
@@ -1717,6 +1723,74 @@ static byte *recv_parse_or_apply_log_rec_body(
             std::pair<space_id_t, lsn_t>(space_id, recv_sys->recovered_lsn));
       }
 #endif /* UNIV_HOTBACKUP */
+
+#ifdef XTRABACKUP
+      /* While scaning redo logs during  backup phase a
+      MLOG_INDEX_LOAD type redo log record indicates a DDL
+      (create index, alter table...)is performed with
+      'algorithm=inplace'. This redo log indicates that
+
+      1. The DDL was started after PXB started backing up, in which
+      case PXB will not be able to take a consistent backup and should
+      fail. or
+      2. There is a possibility of this record existing in the REDO
+      even after the completion of the index create operation. This is
+      because of InnoDB does  not checkpointing after the flushing the
+      index pages.
+
+      If PXB gets the last_redo_flush_lsn and that is less than the
+      lsn of the current record PXB fails the backup process.
+      Error out in case of online backup and emit a warning in case
+      of offline backup and continue. */
+      if (!recv_recovery_on) {
+        if (redo_catchup_completed) {
+          if (backup_redo_log_flushed_lsn < recv_sys->recovered_lsn) {
+            xb::info() << "Last flushed lsn: " << backup_redo_log_flushed_lsn
+                       << " load_index lsn " << recv_sys->recovered_lsn;
+
+            if (backup_redo_log_flushed_lsn == 0) {
+              xb::error(ER_IB_MSG_715) << "PXB was not able"
+                                       << " to determine the"
+                                       << " InnoDB Engine"
+                                       << " Status";
+            }
+
+            xb::error(ER_IB_MSG_716) << "An optimized (without"
+                                     << " redo logging) DDL"
+                                     << " operation has been"
+                                     << " performed. All modified"
+                                     << " pages may not have been"
+                                     << " flushed to the disk yet.\n"
+                                     << "    PXB will not be able to"
+                                     << " take a consistent backup."
+                                     << " Retry the backup"
+                                     << " operation";
+            exit(EXIT_FAILURE);
+          }
+          /** else the index is flushed to disk before
+          backup started hence no error */
+        } else {
+          // While scaning redo logs during a backup operation a
+          // MLOG_INDEX_LOAD type redo log record indicates, that a DDL
+          // (create index, alter table...) is performed with
+          // 'algorithm=inplace'. If using pagetracking, the affected tablespace
+          // must be copied using full scan. Record it in the full_scan_tables
+          // We do this during the first scan of redo before starting file copy
+          // thread. This copy is required because Page-tracking relies on
+          // changes from redo. ie PXB has to copy redo as well apart
+          // from copying pages from the pages given by page-tracking list.
+          // Since in-place DDL skips redo logging and the pages that are not
+          // yet flushed, will not be tracked by page-tracking. And since the
+          // redo logging is skipped, PXB will fail to get those changed pages
+          // (on disk .ibd but yet not on pagetracking). hence, we rely on
+          // re-copying the datafiles.
+          if (opt_page_tracking && xtrabackup_incremental != nullptr &&
+              recv_sys->recovered_lsn > incremental_start_checkpoint_lsn) {
+            full_scan_tables.insert(space_id);
+          }
+        }
+      }
+#endif /* XTRABACKUP */
       if (end_ptr < ptr + 8) {
         return nullptr;
       }
@@ -1752,7 +1826,7 @@ static byte *recv_parse_or_apply_log_rec_body(
           tablespace. */
           if (opt_page_tracking && xtrabackup_incremental != nullptr &&
               recv_sys->recovered_lsn > incremental_start_checkpoint_lsn) {
-            full_scan_tables[space_id] = true;
+            full_scan_tables.insert(space_id);
           }
 #endif /* XTRABACKUP */
 
