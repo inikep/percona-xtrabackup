@@ -13,6 +13,9 @@ function xtrabackup()
 {
   if [ -z ${WITH_RR+x} ]; then
     run_cmd $XB_BIN $XB_ARGS "$@"
+  else
+    run_cmd rr $XB_BIN $XB_ARGS "$@"
+  fi
 
 #### for --backup, copy backup director into var if -k option is passed
   if [ ! -z "${KEEP_VAR}" ]
@@ -384,8 +387,6 @@ user=root
 [xtrabackup]
 ${XB_EXTRA_MY_CNF_OPTS:-}
 EOF
-
-        local new_instance
 
         # Create datadir and call mysql_install_db if it doesn't exist
         if [ ! -d "$MYSQLD_DATADIR" ]
