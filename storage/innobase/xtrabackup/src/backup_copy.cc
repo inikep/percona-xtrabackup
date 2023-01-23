@@ -796,7 +796,6 @@ static bool reencrypt_redo_header(const char *dir, const char *filename,
   char fullpath[FN_REFLEN];
   auto log_buf = ut_make_unique_ptr_nokey(UNIV_PAGE_SIZE_MAX * 128);
   byte encrypt_info[Encryption::INFO_SIZE];
-  fil_space_t space;
 
   fn_format(fullpath, filename, dir, "", MYF(MY_RELATIVE_PATH));
 
@@ -820,16 +819,14 @@ static bool reencrypt_redo_header(const char *dir, const char *filename,
   xb::info() << "Encrypting " << fullpath << " header with new master key";
 
   memset(encrypt_info, 0, Encryption::INFO_SIZE);
-  space.id = dict_sys_t::s_log_space_id;
   byte key[Encryption::KEY_LEN];
   byte iv[Encryption::KEY_LEN];
-  bool found = xb_fetch_tablespace_key(space.id, key, iv);
+  bool found = xb_fetch_tablespace_key(dict_sys_t::s_log_space_id, key, iv);
   ut_a(found);
-  Encryption::set_or_generate(Encryption::AES, key, iv,
-                              space.m_encryption_metadata);
+  Encryption_metadata em;
+  Encryption::set_or_generate(Encryption::AES, key, iv, em);
 
-  if (!Encryption::fill_encryption_info(space.m_encryption_metadata, true,
-                                        encrypt_info)) {
+  if (!Encryption::fill_encryption_info(em, true, encrypt_info)) {
     my_close(fd, MYF(MY_FAE));
     return (false);
   }
@@ -849,7 +846,6 @@ static bool reencrypt_datafile_header(const char *dir, const char *filepath,
   char fullpath[FN_REFLEN];
   byte buf[UNIV_PAGE_SIZE_MAX * 2];
   byte encrypt_info[Encryption::INFO_SIZE];
-  fil_space_t space;
 
   fn_format(fullpath, filepath, dir, "", MYF(MY_RELATIVE_PATH));
 
@@ -877,9 +873,10 @@ static bool reencrypt_datafile_header(const char *dir, const char *filepath,
              << " tablespace header with new master key.";
 
   memset(encrypt_info, 0, Encryption::INFO_SIZE);
+
   byte key[Encryption::KEY_LEN];
   byte iv[Encryption::KEY_LEN];
-  bool found = xb_fetch_tablespace_key(dict_sys_t::s_log_space_id, key, iv);
+  bool found = xb_fetch_tablespace_key(page_get_space_id(page), key, iv);
   ut_a(found);
   Encryption_metadata em;
   Encryption::set_or_generate(Encryption::AES, key, iv, em);
