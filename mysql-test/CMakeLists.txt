@@ -22,70 +22,90 @@
 
 # Skip -- Up-to-date messages in case of multiple 'make install'.
 # This works for CMAKE 3.1.3 and up
+SET(CMAKE_INSTALL_MESSAGE LAZY)
 
-#Disable MTR for PXB
-IF(NOT WITH_XTRABACKUP)
-  SET(CMAKE_INSTALL_MESSAGE LAZY)
-  
-  IF(INSTALL_MYSQLTESTDIR)
-    INSTALL(
-      DIRECTORY .
-      DESTINATION ${INSTALL_MYSQLTESTDIR}
-      USE_SOURCE_PERMISSIONS
-      COMPONENT Test
-      PATTERN "var" EXCLUDE
-      PATTERN "var/" EXCLUDE
-      PATTERN "lib/My/SafeProcess" EXCLUDE
-      PATTERN "CPack" EXCLUDE
-      PATTERN "CMake*" EXCLUDE
-      PATTERN "Makefile" EXCLUDE
-      PATTERN "mtr.out*" EXCLUDE
-      PATTERN "*.cmake" EXCLUDE
-      PATTERN "*.in" EXCLUDE
+IF(INSTALL_MYSQLTESTDIR)
+  INSTALL(
+    DIRECTORY .
+    DESTINATION ${INSTALL_MYSQLTESTDIR}
+    USE_SOURCE_PERMISSIONS
+    COMPONENT Test
+    PATTERN "var" EXCLUDE
+    PATTERN "var/" EXCLUDE
+    PATTERN "lib/My/SafeProcess" EXCLUDE
+    PATTERN "CPack" EXCLUDE
+    PATTERN "CMake*" EXCLUDE
+    PATTERN "Makefile" EXCLUDE
+    PATTERN "mtr.out*" EXCLUDE
+    PATTERN "*.cmake" EXCLUDE
+    PATTERN "*.in" EXCLUDE
+    )
+  IF(NOT INSTALL_LAYOUT MATCHES "RPM" AND
+      NOT INSTALL_LAYOUT MATCHES "DEB")
+    INSTALL(FILES ${CMAKE_SOURCE_DIR}/LICENSE
+      DESTINATION ${INSTALL_DOCREADMEDIR}
+      COMPONENT TestReadme
+      RENAME LICENSE-test
+      )
+    INSTALL(FILES ${CMAKE_SOURCE_DIR}/README
+      DESTINATION ${INSTALL_DOCREADMEDIR}
+      COMPONENT TestReadme
+      RENAME README-test
       )
   ENDIF()
-  
-  
-  IF(NOT ${CMAKE_SOURCE_DIR} STREQUAL ${CMAKE_BINARY_DIR})
-    # Enable running mtr from build directory
-    FIND_PROGRAM(PERL_EXECUTABLE perl
-      /usr/bin /usr/local/bin
-      NO_CMAKE_ENVIRONMENT_PATH
-      NO_SYSTEM_ENVIRONMENT_PATH)
-    # If not found in hard-coded list above, look in PATH as well.
-    FIND_PROGRAM(PERL_EXECUTABLE perl)
-  
-    CONFIGURE_FILE(
-      ${CMAKE_CURRENT_SOURCE_DIR}/mtr.out-of-source 
-      ${CMAKE_CURRENT_BINARY_DIR}/mysql-test-run.pl
-      @ONLY
-    )
+ENDIF()
+
+
+IF(NOT ${CMAKE_SOURCE_DIR} STREQUAL ${CMAKE_BINARY_DIR})
+  # Enable running mtr from build directory
+  FIND_PROGRAM(PERL_EXECUTABLE perl
+    /usr/bin /usr/local/bin
+    NO_CMAKE_ENVIRONMENT_PATH
+    NO_SYSTEM_ENVIRONMENT_PATH)
+  # If not found in hard-coded list above, look in PATH as well.
+  FIND_PROGRAM(PERL_EXECUTABLE perl)
+
+  CONFIGURE_FILE(
+    ${CMAKE_CURRENT_SOURCE_DIR}/mtr.out-of-source 
+    ${CMAKE_CURRENT_BINARY_DIR}/mysql-test-run.pl
+    @ONLY
+  )
+ENDIF()
+IF(UNIX)
+  EXECUTE_PROCESS(
+    COMMAND chmod +x  mysql-test-run.pl
+    COMMAND ${CMAKE_COMMAND} -E create_symlink 
+     ./mysql-test-run.pl mtr
+    COMMAND ${CMAKE_COMMAND} -E create_symlink 
+     ./mysql-test-run.pl mysql-test-run
+    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+  ) 
+  IF(INSTALL_MYSQLTESTDIR)
+    INSTALL(FILES ${CMAKE_CURRENT_BINARY_DIR}/mtr 
+      ${CMAKE_CURRENT_BINARY_DIR}/mysql-test-run 
+      DESTINATION ${INSTALL_MYSQLTESTDIR}
+      COMPONENT Test)
   ENDIF()
-  IF(UNIX)
-    EXECUTE_PROCESS(
-      COMMAND chmod +x  mysql-test-run.pl
-      COMMAND ${CMAKE_COMMAND} -E create_symlink 
-       ./mysql-test-run.pl mtr
-      COMMAND ${CMAKE_COMMAND} -E create_symlink 
-       ./mysql-test-run.pl mysql-test-run
-      WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-    ) 
-    IF(INSTALL_MYSQLTESTDIR)
-      INSTALL(FILES ${CMAKE_CURRENT_BINARY_DIR}/mtr 
-        ${CMAKE_CURRENT_BINARY_DIR}/mysql-test-run 
-        DESTINATION ${INSTALL_MYSQLTESTDIR}
-        COMPONENT Test)
-    ENDIF()
-  ENDIF()
-  
-  
-  SET(EXP --experimental=collections/default.experimental)
-  
-  SET(DEBUG_SERVER "")
-  SET(VS_CONFIG "")
-  
-  IF(DEBUG_EXTNAME)
+ENDIF()
+
+
+SET(EXP --experimental=collections/default.experimental)
+
+SET(DEBUG_SERVER "")
+SET(VS_CONFIG "")
+
+IF(DEBUG_EXTNAME)
+  SET(DEBUG_SERVER "--debug-server")
+ENDIF()
+
+IF(CMAKE_BUILD_TYPE)
+  IF(CMAKE_BUILD_TYPE_UPPER STREQUAL "DEBUG")
     SET(DEBUG_SERVER "--debug-server")
+  ELSE()
+    SET(DEBUG_SERVER "")
+    IF(NOT BUILD_IS_SINGLE_CONFIG)
+      SET(VS_CONFIG "--vs-config=${CMAKE_CFG_INTDIR}")
+    ENDIF()
   ENDIF()
 ENDIF()
 
