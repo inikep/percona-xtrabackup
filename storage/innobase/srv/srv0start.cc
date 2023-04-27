@@ -1569,10 +1569,16 @@ static dberr_t recreate_redo_files(lsn_t &flushed_lsn) {
   tables space in case the shutdown wasn't slow. In such case we should start
   from an lsn at least equal to checkpoint_lsn as pages in the tablespace will
   have lsns larger than flushed_lsn. */
+
+#ifdef XTRABACKUP
+  /* PXB recreates redo log file for rollback of transactions */
+  ut_ad(!srv_apply_log_only && !srv_read_only_mode);
+#else
   if (recv_sys->checkpoint_lsn != 0) {
     ut_ad(flushed_lsn <= recv_sys->checkpoint_lsn);
     flushed_lsn = std::max(flushed_lsn, recv_sys->checkpoint_lsn);
   }
+#endif  // XTRABACKUP
 
   /* This is to provide the property that data byte at given lsn never
   changes and avoid the need to rewrite the block with flushed_lsn. */
@@ -2203,7 +2209,9 @@ dberr_t srv_start(bool create_new_db IF_XB(, lsn_t to_lsn)) {
 
     log_sys->m_allow_checkpoints.store(true, std::memory_order_release);
 
-    if (recv_sys->is_cloned_db || recv_sys->is_meb_db) {
+    if (IF_XB((!srv_apply_log_only && !srv_read_only_mode) ||)
+            recv_sys->is_cloned_db ||
+        recv_sys->is_meb_db) {
       buf_pool_wait_for_no_pending_io();
 
       /* Reset creator for log */
@@ -2214,10 +2222,20 @@ dberr_t srv_start(bool create_new_db IF_XB(, lsn_t to_lsn)) {
 
       ut_ad(buf_pool_pending_io_reads_count() == 0);
 
+#ifdef XTRABACKUP
+      /* we have to recreate redo log file always during PXB prepare because
+      the ib_redo0 file is always full and we cannot reuse it. No circular
+      buffer logic from 8.0.30. Recreate this #ib_redo0 file and it will be
+      used by transaction rollbacks */
+      lsn_t redo_log_flushed_lsn = log_sys->flushed_to_disk_lsn.load();
+      recreate_redo_files(redo_log_flushed_lsn);
+#else
+
       err = log_files_reset_creator_and_set_full(*log_sys);
       if (err != DB_SUCCESS) {
         return srv_init_abort(err);
       }
+#endif  // XTRABACKUP
 
       log_start_background_threads(*log_sys);
 
@@ -2544,6 +2562,18 @@ void srv_start_threads() {
     purge_sys->state = PURGE_STATE_DISABLED;
     return;
   }
+#ifdef XTRABACKUP
+  if (!srv_apply_log_only && srv_force_recovery < SRV_FORCE_NO_TRX_UNDO &&
+      trx_sys_need_rollback()) {
+    /* Rollback all recovered transactions that are
+    not in committed nor in XA PREPARE state. */
+    srv_threads.m_trx_recovery_rollback = os_thread_create(
+        trx_recovery_rollback_thread_key, 0, trx_recovery_rollback_thread);
+
+    srv_threads.m_trx_recovery_rollback.start();
+  }
+
+#endif  // XTRABACKUP
 
   /* Create the master thread which does purge and other utility
   operations */
