@@ -583,6 +583,10 @@ bool Encryption::decode_encryption_info(byte *key, byte *iv,
   return (true);
 }
 
+void Encryption::set_master_key(ulint master_key_id) {
+  s_master_key_id = master_key_id;
+}
+
 bool Encryption::is_encrypted_page(const byte *page) noexcept {
   ulint page_type = mach_read_from_2(page + FIL_PAGE_TYPE);
 

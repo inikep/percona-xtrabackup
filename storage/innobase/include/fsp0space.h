@@ -64,15 +64,11 @@ class Tablespace {
     shutdown();
     ut_ad(m_files.empty());
     ut_ad(m_space_id == SPACE_UNKNOWN);
-    if (m_name != nullptr) {
-      ut_free(m_name);
-      m_name = nullptr;
-    }
-    if (m_path != nullptr) {
-      ut_free(m_path);
-      m_path = nullptr;
-    }
   }
+
+  files_t::iterator files_begin() { return m_files.begin(); }
+
+  files_t::iterator files_end() { return m_files.end(); }
 
   // Disable copying
   Tablespace(const Tablespace &);
