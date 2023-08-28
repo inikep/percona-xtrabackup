@@ -116,6 +116,7 @@
 #cmakedefine HAVE_MEMALIGN 1
 #cmakedefine HAVE_NL_LANGINFO 1
 #cmakedefine HAVE_HTONLL 1
+#cmakedefine HAVE_MEMSET_S 1
 #cmakedefine HAVE_EPOLL 1
 
 /* WL2373 */
