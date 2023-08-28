@@ -691,6 +691,13 @@ extern ulong srv_max_purge_lag;
 extern ulong srv_max_purge_lag_delay;
 
 std::chrono::milliseconds get_srv_replication_delay();
+#ifdef XTRABACKUP
+
+extern bool srv_apply_log_only;
+
+extern bool srv_backup_mode;
+extern bool srv_close_files;
+#endif /* XTRABACKUP */
 /*-------------------------------------------*/
 
 extern bool srv_print_innodb_monitor;
@@ -1070,6 +1077,10 @@ void srv_purge_wakeup(void);
 /** Check if the purge threads are active, both coordinator and worker threads
 @return true if any thread is active, false if no thread is active */
 bool srv_purge_threads_active();
+
+/** Initializes the synchronization primitives, memory system, and the thread
+ local storage. */
+void srv_general_init();
 
 /** Create an undo tablespace with an explicit file name
 This is called during CREATE UNDO TABLESPACE.
