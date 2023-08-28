@@ -277,3 +277,7 @@ IF(CMAKE_COMPILER_IS_GNUCXX AND CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64")
       )
   ENDIF()
 ENDIF()
+
+# Must be after all ADD_DEFINITIONS() to be inherited by the
+# 'xtrabackup' subdirectory
+ADD_SUBDIRECTORY(xtrabackup)
