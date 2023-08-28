@@ -525,7 +525,7 @@ dict_table_t *dd_table_create_on_dd_obj(const dd::Table *dd_table,
   if (is_encrypted) {
     /* We don't support encrypt intrinsic and temporary table.  */
     ut_ad(!table->is_intrinsic() && !table->is_temporary());
-    DICT_TF2_FLAG_SET(table, DICT_TF2_ENCRYPTION);
+    DICT_TF2_FLAG_SET(table, DICT_TF2_ENCRYPTION_FILE_PER_TABLE);
   }
 
   ulint i = 0;

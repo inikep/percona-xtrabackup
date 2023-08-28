@@ -74,7 +74,7 @@ this program; if not, write to the Free Software Foundation, Inc.,
   fputs(
       "InnoDB: We intentionally generate a memory trap.\n"
       "InnoDB: Submit a detailed bug report"
-      " to http://bugs.mysql.com.\n"
+      " to https://jira.percona.com/projects/PXB.\n"
       "InnoDB: If you get repeated assertion failures"
       " or crashes, even\n"
       "InnoDB: immediately after the mysqld startup, there may be\n"

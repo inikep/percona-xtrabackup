@@ -2517,7 +2517,7 @@ bool Fil_shard::open_file(fil_node_t *file, bool extend) {
 #if !defined(UNIV_HOTBACKUP) && !defined(XTRABACKUP)
        && undo::is_active(space->id, false) &&
        srv_startup_is_before_trx_rollback_phase
-#endif /* !UNIV_HOTBACKUP */
+#endif /* !UNIV_HOTBACKUP && !XTRABACKUP */
        )) {
 
     /* We don't know the file size yet. */
@@ -8836,10 +8836,11 @@ bool Fil_system::encryption_rotate_in_a_shard(Fil_shard *shard) {
     if (space->encryption_type != Encryption::NONE) {
       memset(encrypt_info, 0, ENCRYPTION_INFO_SIZE);
 
+      MDL_ticket *mdl_ticket = nullptr;
+#if !defined(XTRABACKUP)
       /* Take MDL on UNDO tablespace to make it mutually exclusive with
       UNDO tablespace truncation. For other tablespaces MDL is not required
       here. */
-      MDL_ticket *mdl_ticket = nullptr;
       if (fsp_is_undo_tablespace(space->id)) {
         THD *thd = current_thd;
         while (
@@ -8853,6 +8854,7 @@ bool Fil_system::encryption_rotate_in_a_shard(Fil_shard *shard) {
         }
         ut_ad(mdl_ticket != nullptr);
       }
+#endif
 
       mtr_t mtr;
       mtr_start(&mtr);

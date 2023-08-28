@@ -622,10 +622,12 @@ void recv_read_log_seg(log_t &log, byte *buf, lsn_t start_lsn, lsn_t end_lsn);
 /** Adds data from a new log block to the parsing buffer of recv_sys if
 recv_sys->parse_start_lsn is non-zero.
 @param[in]  log_block   log block
-@param[in]  scanned_lsn   lsn of how far we were able
-                                        to find data in this log block
+@param[in]  scanned_lsn  lsn of how far we were able
+                         to find data in this log block
+@param[in]  len          0 if full block or length of the data to add
 @return true if more data added */
-bool recv_sys_add_to_parsing_buf(const byte *log_block, lsn_t scanned_lsn);
+bool recv_sys_add_to_parsing_buf(const byte *log_block, lsn_t scanned_lsn,
+                                 ulint len);
 
 /** Moves the parsing buffer data left to the buffer start. */
 void recv_reset_buffer();
