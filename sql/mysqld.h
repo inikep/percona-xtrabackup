@@ -126,6 +126,8 @@ ulong sql_rnd_with_mutex();
 
 struct System_status_var *get_thd_status_var(THD *thd, bool *aggregated);
 
+bool component_infrastructure_deinit();
+bool component_infrastructure_init();
 // These are needed for unit testing.
 void set_remaining_args(int argc, char **argv);
 int init_common_variables();
