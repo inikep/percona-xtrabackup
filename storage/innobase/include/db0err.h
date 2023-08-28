@@ -151,6 +151,8 @@ enum dberr_t {
   DB_SERVER_VERSION_LOW,
   /** The path is too long for the OS */
   DB_TOO_LONG_PATH,
+  /** Page is blank */
+  DB_PAGE_IS_BLANK,
   /** Generic IO error */
   DB_IO_ERROR = 100,
   /** Failure to decompress a page after reading it from disk */

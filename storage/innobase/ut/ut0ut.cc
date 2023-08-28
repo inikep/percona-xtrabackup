@@ -498,6 +498,9 @@ const char *ut_strerr(dberr_t num) {
           "Cannot create tablespace since the filepath is too long for this "
           "OS");
 
+    case DB_PAGE_IS_BLANK:
+      return ("Page is blank");
+
     case DB_ERROR_UNSET:;
       /* Fall through. */
 
@@ -518,23 +521,31 @@ namespace ib {
 logger::~logger() {
   auto s = m_oss.str();
 
+#if !(defined XTRABACKUP)
   LogEvent()
       .type(LOG_TYPE_ERROR)
       .prio(m_level)
       .errcode(m_err)
       .subsys("InnoDB")
       .verbatim(s.c_str());
+#else
+  fprintf(stderr, "%s\n", s.c_str());
+#endif
 }
 
 fatal::~fatal() {
   auto s = m_oss.str();
 
+#if !(defined XTRABACKUP)
   LogEvent()
       .type(LOG_TYPE_ERROR)
       .prio(m_level)
       .errcode(m_err)
       .subsys("InnoDB")
       .verbatim(s.c_str());
+#else
+  fprintf(stderr, "%s\n", s.c_str());
+#endif
 
   ut_error;
 }

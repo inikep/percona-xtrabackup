@@ -322,6 +322,46 @@ page_no_t trx_sysf_rseg_find_page_no(ulint rseg_id) {
   return (page_no);
 }
 
+/*****************************************************************/ /**
+ Read WSREP XID information from the trx system header if the magic value
+ shows it is valid. This code has been copied from MySQL patches by Codership
+ with some modifications.
+ @return true if the magic value is valid. Otherwise
+ return false and leave 'xid' unchanged. */
+bool trx_sys_read_wsrep_checkpoint(XID *xid)
+/*===================================*/
+{
+  trx_sysf_t *sys_header;
+  mtr_t mtr;
+  ulint magic;
+
+  ut_ad(xid);
+
+  mtr_start(&mtr);
+
+  sys_header = trx_sysf_get(&mtr);
+  magic = mach_read_from_4(sys_header + TRX_SYS_WSREP_XID_INFO +
+                           TRX_SYS_WSREP_XID_MAGIC_N_FLD);
+
+  if (magic != TRX_SYS_WSREP_XID_MAGIC_N) {
+    mtr_commit(&mtr);
+    return (false);
+  }
+
+  xid->set_format_id((long)mach_read_from_4(
+      sys_header + TRX_SYS_WSREP_XID_INFO + TRX_SYS_WSREP_XID_FORMAT));
+  xid->set_gtrid_length((long)mach_read_from_4(
+      sys_header + TRX_SYS_WSREP_XID_INFO + TRX_SYS_WSREP_XID_GTRID_LEN));
+  xid->set_bqual_length((long)mach_read_from_4(
+      sys_header + TRX_SYS_WSREP_XID_INFO + TRX_SYS_WSREP_XID_BQUAL_LEN));
+  xid->set_data(sys_header + TRX_SYS_WSREP_XID_INFO + TRX_SYS_WSREP_XID_DATA,
+                XIDDATASIZE);
+
+  mtr_commit(&mtr);
+
+  return (true);
+}
+
 /** Look for a free slot for a rollback segment in the trx system file copy.
 @param[in,out]	mtr		mtr
 @return slot index or ULINT_UNDEFINED if not found */

@@ -100,10 +100,10 @@ otherwise.  Note that this is false while a background thread is
 rolling back incomplete transactions. */
 volatile bool recv_recovery_on;
 
-#ifdef UNIV_HOTBACKUP
 volatile bool is_online_redo_copy = true;
 volatile lsn_t backup_redo_log_flushed_lsn;
 
+#ifdef UNIV_HOTBACKUP
 extern bool meb_is_space_loaded(const space_id_t space_id);
 
 /* Re-define mutex macros to use the Mutex class defined by the MEB
@@ -217,14 +217,6 @@ static bool recv_writer_is_active() {
 /* prototypes */
 
 #ifndef UNIV_HOTBACKUP
-
-/** Reads a specified log segment to a buffer.
-@param[in,out]	log		redo log
-@param[in,out]	buf		buffer where to read
-@param[in]	start_lsn	read area start
-@param[in]	end_lsn		read area end */
-static void recv_read_log_seg(log_t &log, byte *buf, lsn_t start_lsn,
-                              lsn_t end_lsn);
 
 /** Initialize crash recovery environment. Can be called iff
 recv_needed_recovery == false. */
@@ -686,9 +678,9 @@ static
 block.
 @param[in]	block	pointer to a log block
 @return whether the checksum matches */
-#ifndef UNIV_HOTBACKUP
+#if !defined(UNIV_HOTBACKUP) && !defined(XTRABACKUP)
 static
-#endif /* !UNIV_HOTBACKUP */
+#endif /* !UNIV_HOTBACKUP && !XTRABACKUP */
     bool
     log_block_checksum_is_ok(const byte *block) {
   return (!srv_log_checksums ||
@@ -1002,8 +994,8 @@ static dberr_t recv_log_recover_pre_8_0_4(log_t &log,
 @param[in,out]	log		redo log
 @param[out]	max_field	LOG_CHECKPOINT_1 or LOG_CHECKPOINT_2
 @return error code or DB_SUCCESS */
-static MY_ATTRIBUTE((warn_unused_result)) dberr_t
-    recv_find_max_checkpoint(log_t &log, ulint *max_field) {
+MY_ATTRIBUTE((warn_unused_result))
+dberr_t recv_find_max_checkpoint(log_t &log, ulint *max_field) {
   bool found_checkpoint = false;
 
   *max_field = 0;
@@ -3091,7 +3083,7 @@ static bool recv_multi_rec(byte *ptr, byte *end_ptr) {
 /** Parse log records from a buffer and optionally store them to a
 hash table to wait merging to file pages.
 @param[in]	checkpoint_lsn	the LSN of the latest checkpoint */
-static void recv_parse_log_recs(lsn_t checkpoint_lsn) {
+void recv_parse_log_recs(lsn_t checkpoint_lsn) {
   ut_ad(recv_sys->parse_start_lsn != 0);
 
   for (;;) {
@@ -3129,12 +3121,13 @@ static void recv_parse_log_recs(lsn_t checkpoint_lsn) {
 
 /** Adds data from a new log block to the parsing buffer of recv_sys if
 recv_sys->parse_start_lsn is non-zero.
-@param[in]	log_block		log block
-@param[in]	scanned_lsn		lsn of how far we were able
-                                        to find data in this log block
+@param[in]  log_block   log block
+@param[in]  scanned_lsn  lsn of how far we were able
+                         to find data in this log block
+@param[in]  len          0 if full block or length of the data to add
 @return true if more data added */
-static bool recv_sys_add_to_parsing_buf(const byte *log_block,
-                                        lsn_t scanned_lsn) {
+bool recv_sys_add_to_parsing_buf(const byte *log_block, lsn_t scanned_lsn,
+                                 ulint len) {
   ut_ad(scanned_lsn >= recv_sys->scanned_lsn);
 
   if (!recv_sys->parse_start_lsn) {
@@ -3145,7 +3138,7 @@ static bool recv_sys_add_to_parsing_buf(const byte *log_block,
   }
 
   ulint more_len;
-  ulint data_len = log_block_get_data_len(log_block);
+  ulint data_len = len > 0 ? len : log_block_get_data_len(log_block);
 
   if (recv_sys->parse_start_lsn >= scanned_lsn) {
     return (false);
@@ -3193,7 +3186,7 @@ static bool recv_sys_add_to_parsing_buf(const byte *log_block,
 }
 
 /** Moves the parsing buffer data left to the buffer start. */
-static void recv_reset_buffer() {
+void recv_reset_buffer() {
   ut_memmove(recv_sys->buf, recv_sys->buf + recv_sys->recovered_offset,
              recv_sys->len - recv_sys->recovered_offset);
 
@@ -3388,7 +3381,8 @@ bool meb_scan_log_recs(
       }
 
       if (!recv_sys->found_corrupt_log) {
-        more_data = recv_sys_add_to_parsing_buf(log_block, scanned_lsn);
+        more_data =
+            recv_sys_add_to_parsing_buf(log_block, scanned_lsn, data_len);
       }
 
       recv_sys->scanned_lsn = scanned_lsn;
@@ -3520,8 +3514,7 @@ bool meb_read_log_encryption(IORequest &encryption_request,
 @param[in,out]	buf		buffer where to read
 @param[in]	start_lsn	read area start
 @param[in]	end_lsn		read area end */
-static void recv_read_log_seg(log_t &log, byte *buf, lsn_t start_lsn,
-                              lsn_t end_lsn) {
+void recv_read_log_seg(log_t &log, byte *buf, lsn_t start_lsn, lsn_t end_lsn) {
   log_background_threads_inactive_validate(log);
 
   do {
