@@ -375,9 +375,15 @@ Sdi_type serialize(const Tablespace &tablespace) {
    compatibility check: MYSQL_VERSION less than or equal, dd_version
    equal, and sdi_version equal.
 */
-bool CheckDefaultCompatibility(const RJ_Document &doc) {
+bool CheckDefaultCompatibility(const RJ_Document &doc __attribute__((unused))) {
   assert(doc.HasMember("mysqld_version_id"));
-
+#if defined(XTRABACKUP)
+  assert(doc["mysqld_version_id"].IsUint64());
+  assert(doc.HasMember("dd_version"));
+  assert(doc["dd_version"].IsUint());
+  assert(doc.HasMember("sdi_version"));
+  assert(doc["sdi_version"].IsUint64());
+#else
   const RJ_Value &mysqld_version_id = doc["mysqld_version_id"];
   assert(mysqld_version_id.IsUint64());
   if (mysqld_version_id.GetUint64() > std::uint64_t(MYSQL_VERSION_ID)) {
@@ -408,6 +414,7 @@ bool CheckDefaultCompatibility(const RJ_Document &doc) {
              SDI_VERSION);
     return true;
   }
+#endif /* !XTRABACKUP */
   return false;
 }
 
