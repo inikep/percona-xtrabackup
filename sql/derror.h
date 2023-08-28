@@ -55,9 +55,10 @@ extern CHARSET_INFO *error_message_charset_info;
 
 class MY_LOCALE_ERRMSGS {
   const char *language;
-  const char **errmsgs;
 
  public:
+  const char **errmsgs;
+
   MY_LOCALE_ERRMSGS(const char *lang_par)
       : language(lang_par), errmsgs(nullptr) {}
 

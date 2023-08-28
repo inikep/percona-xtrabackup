@@ -65,7 +65,7 @@
   @return           In-memory length of values of the submitted column.
 */
 
-static size_t column_pack_length(const dd::Column &col_obj) {
+size_t column_pack_length(const dd::Column &col_obj) {
   bool treat_bit_as_char = false;
 
   if (col_obj.type() == dd::enum_column_types::BIT) {
