@@ -8657,6 +8657,7 @@ bool Fil_system::encryption_rotate_in_a_shard(Fil_shard *shard) {
       memset(encrypt_info, 0, ENCRYPTION_INFO_SIZE);
 
       MDL_ticket *mdl_ticket = nullptr;
+#if !defined(XTRABACKUP)
       /* Take MDL on UNDO tablespace to make it mutually exclusive with
       UNDO tablespace truncation. For other tablespaces MDL is not required
       here. */
@@ -8667,6 +8668,7 @@ bool Fil_system::encryption_rotate_in_a_shard(Fil_shard *shard) {
         }
         ut_ad(mdl_ticket != nullptr);
       }
+#endif
 
       mtr_t mtr;
       mtr_start(&mtr);

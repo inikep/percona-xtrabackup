@@ -577,7 +577,7 @@ const char *ut_strerr(dberr_t num) {
           "tablespace");
 
     case DB_NO_SESSION_TEMP:
-      return ("No session temporary tablespace all      ");
+      return ("No session temporary tablespace allocated");
 
     case DB_PAGE_IS_BLANK:
       return ("Page is blank");
