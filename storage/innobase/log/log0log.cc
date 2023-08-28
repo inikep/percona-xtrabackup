@@ -559,6 +559,8 @@ that the proper size of the log buffer should be a power of two.
 @param[out]     log             redo log */
 static void log_calc_buf_size(log_t &log);
 
+uint32_t log_detected_format = UINT32_MAX;
+
 /** Pauses writer, flusher and notifiers and switches user threads
 to write log as former version.
 NOTE: These pause/resume functions should be protected by mutex while serving.
@@ -889,7 +891,9 @@ void log_start_background_threads(log_t &log) {
 
   log_control_writer_threads(log);
 
+#ifndef XTRABACKUP
   meb::redo_log_archive_init();
+#endif
 }
 
 void log_stop_background_threads(log_t &log) {

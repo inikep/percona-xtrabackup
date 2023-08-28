@@ -745,32 +745,34 @@ If we are making a new database, these have been created.
 If doing recovery, these should exist and may be needed for recovery.
 If we fail to open any of these it is a fatal error.
 @return DB_SUCCESS or error code */
-static dberr_t srv_undo_tablespaces_open() {
+static dberr_t srv_undo_tablespaces_open(bool backup_mode) {
   dberr_t err;
 
-  /* If upgrading from 5.7, build a list of existing undo tablespaces
-  from the references in the TRX_SYS page. (not including the system
-  tablespace) */
-  trx_rseg_get_n_undo_tablespaces(trx_sys_undo_spaces);
+  if (!backup_mode) {
+    /* If upgrading from 5.7, build a list of existing undo tablespaces
+    from the references in the TRX_SYS page. (not including the system
+    tablespace) */
+    trx_rseg_get_n_undo_tablespaces(trx_sys_undo_spaces);
 
-  /* If undo tablespaces are being tracked in trx_sys then these
-  will need to be replaced by independent undo tablespaces with
-  reserved space_ids and RSEG_ARRAY pages. */
-  if (trx_sys_undo_spaces->size() > 0) {
-    /* Open each undo tablespace tracked in TRX_SYS. */
-    for (const auto space_id : *trx_sys_undo_spaces) {
-      fil_set_max_space_id_if_bigger(space_id);
+    /* If undo tablespaces are being tracked in trx_sys then these
+    will need to be replaced by independent undo tablespaces with
+    reserved space_ids and RSEG_ARRAY pages. */
+    if (trx_sys_undo_spaces->size() > 0) {
+      /* Open each undo tablespace tracked in TRX_SYS. */
+      for (const auto space_id : *trx_sys_undo_spaces) {
+        fil_set_max_space_id_if_bigger(space_id);
 
-      /* Check if this undo tablespace was in the process of being truncated.
-      If so, just delete the file since it will be replaced. */
-      if (DB_TABLESPACE_DELETED == srv_undo_tablespace_fixup_57(space_id)) {
-        continue;
-      }
+        /* Check if this undo tablespace was in the process of being truncated.
+        If so, just delete the file since it will be replaced. */
+        if (DB_TABLESPACE_DELETED == srv_undo_tablespace_fixup_57(space_id)) {
+          continue;
+        }
 
-      err = srv_undo_tablespace_open_by_id(space_id);
-      if (err != DB_SUCCESS) {
-        ib::error(ER_IB_MSG_CANNOT_OPEN_57_UNDO, ulong{space_id});
-        return (err);
+        err = srv_undo_tablespace_open_by_id(space_id);
+        if (err != DB_SUCCESS) {
+          ib::error(ER_IB_MSG_CANNOT_OPEN_57_UNDO, ulong{space_id});
+          return (err);
+        }
       }
     }
   }
@@ -1190,13 +1192,16 @@ void undo_spaces_deinit() {
 
 /** Open the configured number of implicit undo tablespaces.
 @param[in]      create_new_db   true if new db being created
+@param[in]      backup_mode     true disables reading the system tablespace
+                                (used in XtraBackup), false is passed on
+                                recovery.
 @return DB_SUCCESS or error code */
-static dberr_t srv_undo_tablespaces_init(bool create_new_db) {
+dberr_t srv_undo_tablespaces_init(bool create_new_db, bool backup_mode) {
   dberr_t err = DB_SUCCESS;
 
   /* Open any existing implicit undo tablespaces. */
   if (!create_new_db) {
-    err = srv_undo_tablespaces_open();
+    err = srv_undo_tablespaces_open(backup_mode);
     if (err != DB_SUCCESS) {
       return (err);
     }
@@ -1508,6 +1513,30 @@ static dberr_t srv_init_abort_low(bool create_new_db,
   return (err);
 }
 
+#ifdef XTRABACKUP
+/** At startup load the encryption information from first datafile
+to tablespace object
+@return DB_SUCCESS on succes, others on failure */
+static dberr_t srv_sys_enable_encryption() {
+  fil_space_t *space = fil_space_get(TRX_SYS_SPACE);
+  const ulint fsp_flags = srv_sys_space.m_files.begin()->flags();
+  const bool is_encrypted = FSP_FLAGS_GET_ENCRYPTION(fsp_flags);
+  dberr_t err = DB_SUCCESS;
+
+  if (is_encrypted && !use_dumped_tablespace_keys) {
+    fsp_flags_set_encryption(space->flags);
+    srv_sys_space.set_flags(space->flags);
+
+    err = fil_set_encryption(space->id, Encryption::AES,
+                             srv_sys_space.m_files.begin()->m_encryption_key,
+                             srv_sys_space.m_files.begin()->m_encryption_iv);
+    ut_ad(err == DB_SUCCESS);
+  }
+
+  return (err);
+}
+
+#endif  // XTRABACKUP
 dberr_t srv_start(bool create_new_db) {
   lsn_t flushed_lsn;
 
@@ -1897,7 +1926,7 @@ dberr_t srv_start(bool create_new_db) {
 
     log_start_background_threads(*log_sys);
 
-    err = srv_undo_tablespaces_init(true);
+    err = srv_undo_tablespaces_init(true, false);
 
     if (err != DB_SUCCESS) {
       return (srv_init_abort(err));
@@ -2054,6 +2083,12 @@ dberr_t srv_start(bool create_new_db) {
     tablespaces were found and recovered. */
 
     if (srv_force_recovery == 0 && fil_check_missing_tablespaces()) {
+#ifdef XTRABACKUP
+      // Missing tablespaces in the redo log are a valid possibility
+      // with partial backups.
+      // But keep them in the output for visibility
+      xb::warn(ER_IB_MSG_1139);
+#else
       ib::error(ER_IB_MSG_1139);
       RECOVERY_CRASH(3);
 
@@ -2063,6 +2098,7 @@ dberr_t srv_start(bool create_new_db) {
       ut_a(p == nullptr);
 
       return (srv_init_abort(DB_ERROR));
+#endif /* XTRABACKUP */
     }
 
     /* We have successfully recovered from the redo log. The
@@ -2097,7 +2133,8 @@ dberr_t srv_start(bool create_new_db) {
       DBUG_SUICIDE();
     });
 
-    if (srv_dict_metadata != nullptr && !srv_dict_metadata->empty()) {
+    if (srv_dict_metadata != nullptr && !srv_dict_metadata->empty()
+                                             IF_XB(&&!srv_apply_log_only)) {
       ut_a(redo_writes_allowed);
 
       /* Open this table in case srv_dict_metadata should be applied to this
@@ -2317,7 +2354,7 @@ dberr_t srv_start(bool create_new_db) {
       log_buffer_flush_to_disk(*log_sys);
     }
 
-    err = srv_undo_tablespaces_init(false);
+    err = srv_undo_tablespaces_init(false, false);
 
     if (err != DB_SUCCESS && srv_force_recovery < SRV_FORCE_NO_UNDO_LOG_SCAN) {
       return (srv_init_abort(err));
