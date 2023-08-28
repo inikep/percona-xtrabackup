@@ -503,6 +503,22 @@ ENDIF()
 
 INCLUDE(CMakePushCheckState)
 
+OPTION(WITH_XTRABACKUP "Build XtraBackup" ON)
+# Disallow WITH_XTRABACKUP=OFF builds
+IF(NOT WITH_XTRABACKUP)
+  MESSAGE(FATAL_ERROR "This branch does not support -DWITH_XTRABACKUP=OFF configuration.")
+ELSE()
+  ADD_DEFINITIONS(-DXTRABACKUP)
+ENDIF()
+# Disallow WITHOUT_SERVER=ON builds
+IF(WITHOUT_SERVER)
+  MESSAGE(FATAL_ERROR "This branch does not support -DWITHOUT_SERVER=ON configuration.")
+ENDIF()
+# Disallow WITH_EMBEDDED_SERVER=OFF builds
+IF(NOT WITH_EMBEDDED_SERVER)
+  MESSAGE(FATAL_ERROR "This branch does not support -DWITH_EMBEDDED_SERVER=OFF configuration.")
+ENDIF()
+
 # Add macros
 INCLUDE(pkg-config)
 INCLUDE(character_sets)
@@ -547,7 +563,12 @@ IF(WITH_JEMALLOC)
   STRING_APPEND(CMAKE_CXX_FLAGS " -fno-builtin-realloc -fno-builtin-free")
 ENDIF()
 
-OPTION(ENABLED_PROFILING "Enable profiling" ON)
+OPTION(DISABLE_SHARED 
+ "Don't build shared libraries, compile code as position-dependent" OFF)
+IF(DISABLE_SHARED)
+  MESSAGE("Dynamic plugins are disabled.")
+ENDIF()
+OPTION(ENABLED_PROFILING "Enable profiling" OFF)
 OPTION(WITHOUT_SERVER OFF)
 IF(UNIX)
   OPTION(WITH_VALGRIND "Valgrind instrumentation" OFF)
@@ -556,8 +577,8 @@ IF(WIN32)
   OPTION(WITH_MSCRT_DEBUG "MS Visual Studio Debug CRT instrumentation" OFF)
 ENDIF()
 IF(NOT WITHOUT_SERVER)
-  OPTION(WITH_UNIT_TESTS "Compile MySQL with unit tests" ON)
-  OPTION(WITH_ROUTER "Build MySQL Router" ON)
+  OPTION(WITH_UNIT_TESTS "Compile MySQL with unit tests" OFF)
+  OPTION(WITH_ROUTER "Build MySQL Router" OFF)
 ENDIF()
 
 IF(EXISTS ${CMAKE_SOURCE_DIR}/internal/CMakeLists.txt)
@@ -1348,6 +1369,7 @@ IF(NOT WITHOUT_SERVER)
   MYSQL_CHECK_PROTOBUF()
 ENDIF()
 # Try and set CURL_LIBRARY
+SET(WITH_CURL "system" CACHE STRING "Using system curl by default")
 MYSQL_CHECK_CURL()
 MYSQL_CHECK_CURL_DLLS()
 # Add RapidJSON library.
@@ -1460,6 +1482,7 @@ ENDIF()
 
 IF(NOT WITHOUT_SERVER)
   CONFIGURE_COMPONENTS()
+  ADD_SUBDIRECTORY("components/libminchassis")
 ENDIF()
 
 IF(WITH_UNIT_TESTS)
@@ -1469,13 +1492,11 @@ IF(WITH_UNIT_TESTS)
   ADD_SUBDIRECTORY(unittest/mytap/t)
 ENDIF()
 
-ADD_SUBDIRECTORY(client)
 ADD_SUBDIRECTORY(utilities)
 ADD_SUBDIRECTORY(share)
 ADD_SUBDIRECTORY(libservices)
 
 IF(NOT WITHOUT_SERVER)
-  ADD_SUBDIRECTORY(testclients)
   ADD_SUBDIRECTORY(sql)
 ENDIF()
 
@@ -1500,7 +1521,6 @@ ADD_SUBDIRECTORY(scripts)
 
 IF(NOT WITHOUT_SERVER)
   ADD_SUBDIRECTORY(mysql-test)
-  ADD_SUBDIRECTORY(mysql-test/lib/My/SafeProcess)
   ADD_SUBDIRECTORY(support-files)
   IF(WITH_INTERNAL)
     ADD_SUBDIRECTORY(internal)
@@ -1601,8 +1621,6 @@ IF(WIN32)
 ELSE()
   SET(CPACK_GENERATOR "TGZ")
 ENDIF() 
-ADD_SUBDIRECTORY(packaging/WiX)
-ADD_SUBDIRECTORY(packaging/solaris)
 
 # Produce separate tarballs for each INSTALL COMPONENT
 IF(PACK_SEPARATE_COMPONENTS)
