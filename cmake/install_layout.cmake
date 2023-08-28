@@ -25,7 +25,7 @@
 # The current choices of installation layout are:
 #
 #  STANDALONE
-#    Build with prefix=/usr/local/mysql, create tarball with install prefix="."
+#    Build with prefix=/usr/local/xtrabackup, create tarball with install prefix="."
 #    and relative links.
 #
 #  RPM
@@ -35,7 +35,7 @@
 #    Similar to RPM layout.
 #
 #  SVR4
-#    Solaris package layout suitable for pkg* tools, prefix=/opt/mysql/mysql
+#    Solaris package layout suitable for pkg* tools, prefix=/opt/mysql/xtrabackup
 #
 #  TARGZ
 #    Build with prefix=/usr/local/mysql, create tarball with install prefix="."
@@ -48,7 +48,7 @@
 # There is the possibility to further fine-tune installation directories.
 # Several variables can be overwritten:
 #
-# - INSTALL_BINDIR          (directory with client executables and scripts)
+# - INSTALL_BINDIR          (directory with innobackupex and XtraBackup binaries)
 # - INSTALL_SBINDIR         (directory with mysqld)
 #
 # - INSTALL_LIBDIR          (directory with client libraries)
@@ -64,7 +64,7 @@
 #
 # - INSTALL_SHAREDIR        (location of aclocal/mysql.m4)
 # - INSTALL_MYSQLSHAREDIR   (MySQL character sets and localized error messages)
-# - INSTALL_MYSQLTESTDIR    (mysql-test)
+# - INSTALL_MYSQLTESTDIR    (XtraBackup test suite)
 # - INSTALL_SUPPORTFILESDIR (various extra support files)
 #
 # - INSTALL_MYSQLDATADIR    (data directory)
@@ -89,9 +89,9 @@ IF(UNIX)
   ELSEIF(INSTALL_LAYOUT MATCHES "DEB")
     SET(default_prefix "/usr")
   ELSEIF(INSTALL_LAYOUT MATCHES "SVR4")
-    SET(default_prefix "/opt/mysql/mysql")
+    SET(default_prefix "/opt/mysql/xtrabackup")
   ELSE()
-    SET(default_prefix "/usr/local/mysql")
+    SET(default_prefix "/usr/local/xtrabackup")
   ENDIF()
   IF(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
     SET(CMAKE_INSTALL_PREFIX ${default_prefix}
@@ -159,7 +159,7 @@ SET(INSTALL_INFODIR_STANDALONE          "docs")
 #
 SET(INSTALL_SHAREDIR_STANDALONE         "share")
 SET(INSTALL_MYSQLSHAREDIR_STANDALONE    "share")
-SET(INSTALL_MYSQLTESTDIR_STANDALONE     "mysql-test")
+SET(INSTALL_MYSQLTESTDIR_STANDALONE     "xtrabackup-test")
 SET(INSTALL_SUPPORTFILESDIR_STANDALONE  "support-files")
 #
 SET(INSTALL_MYSQLDATADIR_STANDALONE     "data")
@@ -185,7 +185,7 @@ SET(INSTALL_INFODIR_TARGZ          "docs")
 #
 SET(INSTALL_SHAREDIR_TARGZ         "share")
 SET(INSTALL_MYSQLSHAREDIR_TARGZ    "share")
-SET(INSTALL_MYSQLTESTDIR_TARGZ     "mysql-test")
+SET(INSTALL_MYSQLTESTDIR_TARGZ     "xtrabackup-test")
 SET(INSTALL_SUPPORTFILESDIR_TARGZ  "support-files")
 #
 SET(INSTALL_MYSQLDATADIR_TARGZ     "data")
@@ -225,7 +225,7 @@ SET(INSTALL_MANDIR_RPM                  "share/man")
 #
 SET(INSTALL_SHAREDIR_RPM                "share")
 SET(INSTALL_MYSQLSHAREDIR_RPM           "share/mysql-${MYSQL_BASE_VERSION}")
-SET(INSTALL_MYSQLTESTDIR_RPM            "share/mysql-test")
+SET(INSTALL_MYSQLTESTDIR_RPM            "share/xtrabackup-test")
 SET(INSTALL_SUPPORTFILESDIR_RPM         "share/mysql-${MYSQL_BASE_VERSION}")
 #
 SET(INSTALL_MYSQLDATADIR_RPM            "/var/lib/mysql")
@@ -255,7 +255,7 @@ SET(INSTALL_INFODIR_DEB                 "share/mysql/docs")
 #
 SET(INSTALL_SHAREDIR_DEB                "share")
 SET(INSTALL_MYSQLSHAREDIR_DEB           "share/mysql-${MYSQL_BASE_VERSION}")
-SET(INSTALL_MYSQLTESTDIR_DEB            "lib/mysql-test")
+SET(INSTALL_MYSQLTESTDIR_DEB            "lib/xtrabackup-test")
 SET(INSTALL_SUPPORTFILESDIR_DEB         "share/mysql-${MYSQL_BASE_VERSION}")
 #
 SET(INSTALL_MYSQLDATADIR_DEB            "/var/lib/mysql")
@@ -281,7 +281,7 @@ SET(INSTALL_INFODIR_SVR4                "docs")
 #
 SET(INSTALL_SHAREDIR_SVR4               "share")
 SET(INSTALL_MYSQLSHAREDIR_SVR4          "share")
-SET(INSTALL_MYSQLTESTDIR_SVR4           "mysql-test")
+SET(INSTALL_MYSQLTESTDIR_SVR4           "xtrabackup-test")
 SET(INSTALL_SUPPORTFILESDIR_SVR4        "support-files")
 #
 SET(INSTALL_MYSQLDATADIR_SVR4           "/var/lib/mysql")

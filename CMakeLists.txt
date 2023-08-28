@@ -521,6 +521,18 @@ ENDIF()
 
 INCLUDE(CMakePushCheckState)
 
+OPTION(WITH_XTRABACKUP "Build XtraBackup" ON)
+# Disallow WITH_XTRABACKUP=OFF builds
+IF(NOT WITH_XTRABACKUP)
+  MESSAGE(FATAL_ERROR "This branch does not support -DWITH_XTRABACKUP=OFF configuration.")
+ELSE()
+  ADD_DEFINITIONS(-DXTRABACKUP)
+ENDIF()
+# Disallow WITHOUT_SERVER=ON builds
+IF(WITHOUT_SERVER)
+  MESSAGE(FATAL_ERROR "This branch does not support -DWITHOUT_SERVER=ON configuration.")
+ENDIF()
+
 # Add macros
 INCLUDE(pkg-config)
 INCLUDE(character_sets)
@@ -581,7 +593,12 @@ IF(WITH_JEMALLOC AND (WITH_TCMALLOC OR WITH_TCMALLOC_DEBUG))
   MESSAGE(FATAL_ERROR "Specify only *one* of WITH_TCMALLOC and WITH_JEMALLOC")
 ENDIF()
 
-OPTION(ENABLED_PROFILING "Enable profiling" ON)
+OPTION(DISABLE_SHARED 
+ "Don't build shared libraries, compile code as position-dependent" OFF)
+IF(DISABLE_SHARED)
+  MESSAGE("Dynamic plugins are disabled.")
+ENDIF()
+OPTION(ENABLED_PROFILING "Enable profiling" OFF)
 OPTION(WITHOUT_SERVER OFF)
 
 IF(WIN32)
@@ -592,9 +609,9 @@ IF(NOT WITHOUT_SERVER)
     # Do not use data from unit testing when optimizing.
     OPTION(WITH_UNIT_TESTS "Compile MySQL with unit tests" OFF)
   ELSE()
-    OPTION(WITH_UNIT_TESTS "Compile MySQL with unit tests" ON)
+    OPTION(WITH_UNIT_TESTS "Compile MySQL with unit tests" OFF)
   ENDIF()
-  OPTION(WITH_ROUTER "Build MySQL Router" ON)
+  OPTION(WITH_ROUTER "Build MySQL Router" OFF)
 ENDIF()
 
 IF(EXISTS ${CMAKE_SOURCE_DIR}/internal/CMakeLists.txt)
@@ -1432,6 +1449,7 @@ IF(NOT WITHOUT_SERVER)
   MYSQL_CHECK_PROTOBUF_DLLS()
 ENDIF()
 # Try and set CURL_LIBRARY
+SET(WITH_CURL "system" CACHE STRING "Using system curl by default")
 MYSQL_CHECK_CURL()
 MYSQL_CHECK_CURL_DLLS()
 SET(CURL_WARN_GIVEN)
@@ -1587,6 +1605,7 @@ IF(WITHOUT_SERVER)
   ADD_SUBDIRECTORY(components/libminchassis)
 ELSE()
   CONFIGURE_COMPONENTS()
+  ADD_SUBDIRECTORY("components/libminchassis")
 ENDIF()
 
 IF(WITH_UNIT_TESTS)
@@ -1596,13 +1615,11 @@ IF(WITH_UNIT_TESTS)
   ADD_SUBDIRECTORY(unittest/mytap/t)
 ENDIF()
 
-ADD_SUBDIRECTORY(client)
 ADD_SUBDIRECTORY(utilities)
 ADD_SUBDIRECTORY(share)
 ADD_SUBDIRECTORY(libservices)
 
 IF(NOT WITHOUT_SERVER)
-  ADD_SUBDIRECTORY(testclients)
   ADD_SUBDIRECTORY(sql)
 ENDIF()
 
@@ -1650,7 +1667,6 @@ ADD_SUBDIRECTORY(scripts)
 
 IF(NOT WITHOUT_SERVER)
   ADD_SUBDIRECTORY(mysql-test)
-  ADD_SUBDIRECTORY(mysql-test/lib/My/SafeProcess)
   ADD_SUBDIRECTORY(support-files)
   IF(WITH_INTERNAL)
     ADD_SUBDIRECTORY(internal)
@@ -1751,8 +1767,6 @@ IF(WIN32)
 ELSE()
   SET(CPACK_GENERATOR "TGZ")
 ENDIF() 
-ADD_SUBDIRECTORY(packaging/WiX)
-ADD_SUBDIRECTORY(packaging/solaris)
 
 # Produce separate tarballs for each INSTALL COMPONENT
 IF(PACK_SEPARATE_COMPONENTS)
