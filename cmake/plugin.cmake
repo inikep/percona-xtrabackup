@@ -172,7 +172,7 @@ MACRO(MYSQL_ADD_PLUGIN plugin_arg)
       TARGET_LINK_LIBRARIES (${target} mysqlservices)
     ENDIF()
 
-    # Plugin uses symbols defined in mysqld executable.
+    # Plugin uses symbols defined in xtrabackup executable.
     # Some operating systems like Windows and OSX and are pretty strict about 
     # unresolved symbols. Others are less strict and allow unresolved symbols
     # in shared libraries. On Linux for example, CMake does not even add 
@@ -182,7 +182,7 @@ MACRO(MYSQL_ADD_PLUGIN plugin_arg)
     # Use MYSQL_PLUGIN_IMPORT for static data symbols to be exported.
     IF(NOT ARG_CLIENT_ONLY)
       IF(WIN32 OR APPLE)
-        TARGET_LINK_LIBRARIES (${target} mysqld ${ARG_LINK_LIBRARIES})
+        TARGET_LINK_LIBRARIES (${target} xtrabackup ${ARG_LINK_LIBRARIES})
       ENDIF()
     ENDIF()
     ADD_DEPENDENCIES(${target} GenError ${ARG_DEPENDENCIES})
@@ -261,8 +261,8 @@ ENDMACRO()
 # subdirectories, configure sql_builtin.cc
 MACRO(CONFIGURE_PLUGINS)
   FILE(GLOB dirs_storage ${CMAKE_SOURCE_DIR}/storage/*)
-  FILE(GLOB dirs_plugin ${CMAKE_SOURCE_DIR}/plugin/*)
-  
+  LIST(REMOVE_ITEM dirs_storage ${CMAKE_SOURCE_DIR}/storage/example)
+
   FOREACH(dir ${dirs_storage} ${dirs_plugin})
     IF (EXISTS ${dir}/CMakeLists.txt)
       ADD_SUBDIRECTORY(${dir})
