@@ -258,4 +258,15 @@ bool srv_shutdown_state_matches(F &&f) {
   return std::forward<F>(f)(state);
 }
 
+/** Open the configured number of undo tablespaces.
+@param[in]  create_new_db true if new db being created
+@param[in]  true disables reading the system tablespace (used in XtraBackup),
+            false is passed on recovery.
+@return DB_SUCCESS or error code */
+dberr_t srv_undo_tablespaces_init(bool create_new_db, bool backup_mode);
+
+/** Free the resources occupied by undo::spaces and trx_sys_undo_spaces,
+called once during thread de-initialization. */
+void undo_spaces_deinit();
+
 #endif
