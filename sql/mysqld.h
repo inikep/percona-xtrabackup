@@ -133,6 +133,10 @@ bool is_secure_file_path(const char *path);
 ulong sql_rnd_with_mutex();
 
 struct System_status_var *get_thd_status_var(THD *thd, bool *aggregated);
+#ifdef XTRABACKUP
+bool component_infrastructure_deinit();
+bool component_infrastructure_init();
+#endif /* XTRABACKUP */
 
 #ifndef NDEBUG
 void thd_mem_cnt_alloc(THD *thd, size_t size, const char *key_name);
