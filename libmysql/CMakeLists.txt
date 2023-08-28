@@ -350,6 +350,7 @@ MERGE_LIBRARIES_SHARED(libmysql ${LIBS_TO_MERGE}
   ${UNIX_OUTPUT_NAME}
   ${UNIX_SOVERSION}
   ${UNIX_VERSION}
+  SKIP_INSTALL
   )
 
 # Downgrade warning for strncat in my_crypt_genhash.
