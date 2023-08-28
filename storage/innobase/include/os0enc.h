@@ -145,6 +145,8 @@ class Encryption {
 
   Encryption &operator=(const Encryption &) = default;
 
+  static void set_master_key(ulint master_key_id);
+
   /** Check if page is encrypted page or not
   @param[in]  page  page which need to check
   @return true if it is an encrypted page */

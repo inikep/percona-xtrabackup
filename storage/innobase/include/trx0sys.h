@@ -80,6 +80,14 @@ void trx_sys_create_sys_pages(void);
 @return page number from the TRX_SYS page rseg array */
 page_no_t trx_sysf_rseg_find_page_no(ulint rseg_id);
 
+/*****************************************************************/ /**
+ Read WSREP XID information from the trx system header if the magic value
+ shows it is valid. This code has been copied from MySQL patches by Codership
+ with some modifications.
+ @return true if the magic value is valid. Otherwise
+ return false and leave 'xid' unchanged. */
+bool trx_sys_read_wsrep_checkpoint(XID *xid);
+
 /** Look for a free slot for a rollback segment in the trx system file copy.
 @param[in,out]	mtr		mtr
 @return slot index or ULINT_UNDEFINED if not found */
@@ -363,6 +371,18 @@ are persisted to table */
 #define TRX_SYS_TRX_NUM_GTID \
   (TRX_SYS_MYSQL_LOG_INFO + TRX_SYS_MYSQL_LOG_NAME + TRX_SYS_MYSQL_LOG_NAME_LEN)
 #define TRX_SYS_TRX_NUM_END = (TRX_SYS_TRX_NUM_GTID + 8)
+
+/* The offset to WSREP XID headers */
+#define TRX_SYS_WSREP_XID_INFO (UNIV_PAGE_SIZE - 3500)
+#define TRX_SYS_WSREP_XID_MAGIC_N_FLD 0
+#define TRX_SYS_WSREP_XID_MAGIC_N 0x77737265
+
+/* XID field: formatID, gtrid_len, bqual_len, xid_data */
+#define TRX_SYS_WSREP_XID_LEN (4 + 4 + 4 + XIDDATASIZE)
+#define TRX_SYS_WSREP_XID_FORMAT 4
+#define TRX_SYS_WSREP_XID_GTRID_LEN 8
+#define TRX_SYS_WSREP_XID_BQUAL_LEN 12
+#define TRX_SYS_WSREP_XID_DATA 16
 
 /** Doublewrite buffer */
 /* @{ */
