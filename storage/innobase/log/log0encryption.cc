@@ -111,6 +111,7 @@ dberr_t log_encryption_read(log_t &log, const Log_file &file) {
                                 << " but keyring is not loaded.";
       return DB_ERROR;
     }
+#endif /*!XTRABACKUP*/
 
     Encryption_metadata encryption_metadata;
 
@@ -171,7 +172,9 @@ static dberr_t log_encryption_write_low(log_t &log) {
   byte log_block_buf[OS_FILE_LOG_BLOCK_SIZE];
 
   if (log_can_encrypt(log)) {
-    if (!log_file_header_fill_encryption(log.m_encryption_metadata, true,
+    bool encrypt = true;
+    if (use_dumped_tablespace_keys && !srv_backup_mode) encrypt = false;
+    if (!log_file_header_fill_encryption(log.m_encryption_metadata, encrypt,
                                          log_block_buf)) {
       return DB_ERROR;
     }
@@ -210,8 +213,16 @@ dberr_t log_encryption_generate_metadata(log_t &log) {
 
   Encryption_metadata encryption_metadata;
 
-  Encryption::set_or_generate(Encryption::AES, nullptr, nullptr,
-                              encryption_metadata);
+  if (use_dumped_tablespace_keys && !srv_backup_mode) {
+    byte key[Encryption::KEY_LEN];
+    byte iv[Encryption::KEY_LEN];
+    bool found = xb_fetch_tablespace_key(dict_sys_t::s_log_space_id, key, iv);
+    ut_a(found);
+    Encryption::set_or_generate(Encryption::AES, key, iv, encryption_metadata);
+  } else {
+    Encryption::set_or_generate(Encryption::AES, nullptr, nullptr,
+                                encryption_metadata);
+  }
 
   log_files_update_encryption(log, encryption_metadata);
 

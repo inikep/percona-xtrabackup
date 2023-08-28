@@ -1580,10 +1580,12 @@ dberr_t log_files_create(log_t &log, lsn_t flushed_lsn) {
   /* If the redo log is set to be encrypted,
   initialize encryption information. */
   if (srv_redo_log_encrypt) {
+#ifndef XTRABACKUP
     if (!Encryption::check_keyring()) {
       ib::error(ER_IB_MSG_1065);
       return DB_ERROR;
     }
+#endif
     if (log_encryption_generate_metadata(log) != DB_SUCCESS) {
       return DB_ERROR;
     }
