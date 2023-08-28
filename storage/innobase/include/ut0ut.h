@@ -65,7 +65,6 @@ this program; if not, write to the Free Software Foundation, Inc.,
 #include <ctype.h>
 
 #include <stdarg.h>
-#include "ut/ut.h"
 #include "ut0dbg.h"
 
 #ifndef UNIV_NO_ERR_MSGS
