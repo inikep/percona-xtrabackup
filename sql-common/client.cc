@@ -132,9 +132,21 @@
 #include "sql/client_settings.h"
 #include "sql/server_component/mysql_command_services_imp.h"
 /* mysql_command_service_extn */
+
+#ifdef XTRABACKUP
+MYSQL_FIELD *cli_list_fields(MYSQL *mysql);
+bool cli_read_prepare_result(MYSQL *mysql, MYSQL_STMT *stmt);
+MYSQL_DATA *cli_read_rows(MYSQL *mysql, MYSQL_FIELD *mysql_fields, uint fields);
+int cli_stmt_execute(MYSQL_STMT *stmt);
+int cli_read_binary_rows(MYSQL_STMT *stmt);
+int cli_unbuffered_fetch(MYSQL *mysql, char **row);
+const char *cli_read_statistics(MYSQL *mysql);
+int cli_read_change_user_result(MYSQL *mysql);
+#endif
+
 #else
 #include "libmysql/client_settings.h"
-#endif
+#endif /* MYSQL_SERVER && ! XTRABACKUP */
 #include "client_extensions_macros.h"
 #include "sql/log_event.h"     /* Log_event_type */
 #include "sql/rpl_constants.h" /* mysql_binlog_XXX() */
@@ -1893,7 +1905,7 @@ void end_server(MYSQL *mysql) {
 #endif  // NDEBUG
 #ifdef MYSQL_SERVER
     slave_io_thread_detach_vio();
-#endif
+#endif /* MYSQL_SERVER && ! XTRABACKUP */
     vio_delete(mysql->net.vio);
     mysql->net.vio = nullptr; /* Marker */
     mysql_prune_stmt_list(mysql);
@@ -3229,7 +3241,7 @@ static MYSQL_METHODS client_methods = {
     cli_fetch_lengths,          /* fetch_lengths */
     cli_flush_use_result,       /* flush_use_result */
     cli_read_change_user_result /* read_change_user_result */
-#ifndef MYSQL_SERVER
+#if !defined(MYSQL_SERVER) || defined(XTRABACKUP)
     ,
     cli_list_fields,         /* list_fields */
     cli_read_prepare_result, /* read_prepare_result */
@@ -3240,7 +3252,7 @@ static MYSQL_METHODS client_methods = {
     cli_read_query_result,   /* next_result */
     cli_read_binary_rows,    /* read_rows_from_cursor */
     free_rows
-#endif
+#endif /* ! MYSQL_SERVER || XTRABACKUP */
     ,
     cli_read_query_result_nonblocking,      /* read_query_result_nonblocking */
     cli_advanced_command_nonblocking,       /* advanced_command_nonblocking */
@@ -3346,12 +3358,12 @@ MYSQL_EXTENSION *mysql_extension_init(MYSQL *mysql [[maybe_unused]]) {
       key_memory_MYSQL, sizeof(struct MYSQL_ASYNC), MYF(MY_WME | MY_ZEROFILL)));
   /* set default value */
   ext->mysql_async_context->async_op_status = ASYNC_OP_UNSET;
-#ifdef MYSQL_SERVER
+#if defined(MYSQL_SERVER) && !defined(XTRABACKUP)
   ext->server_extn = nullptr;
   ext->mcs_extn = static_cast<struct mysql_command_service_extn *>(
       my_malloc(key_memory_MYSQL, sizeof(struct mysql_command_service_extn),
                 MYF(MY_WME | MY_ZEROFILL)));
-#endif
+#endif /* MYSQL_SERVER && ! XTRABACKUP */
   DBUG_PRINT("async",
              ("set state=%d", ext->mysql_async_context->async_query_state));
   return ext;
@@ -5749,14 +5761,12 @@ static mysql_state_machine_status authsm_handle_first_authenticate_user(
     mysql_async_auth *ctx) {
   DBUG_TRACE;
   MYSQL *mysql = ctx->mysql;
-  DBUG_PRINT("info",
-             ("authenticate_user returned %s",
-              ctx->res == CR_OK
-                  ? "CR_OK"
-                  : ctx->res == CR_ERROR ? "CR_ERROR"
-                                         : ctx->res == CR_OK_HANDSHAKE_COMPLETE
-                                               ? "CR_OK_HANDSHAKE_COMPLETE"
-                                               : "error"));
+  DBUG_PRINT("info", ("authenticate_user returned %s",
+                      ctx->res == CR_OK      ? "CR_OK"
+                      : ctx->res == CR_ERROR ? "CR_ERROR"
+                      : ctx->res == CR_OK_HANDSHAKE_COMPLETE
+                          ? "CR_OK_HANDSHAKE_COMPLETE"
+                          : "error"));
 
   static_assert(CR_OK == -1, "");
   static_assert(CR_ERROR == 0, "");
@@ -5897,14 +5907,12 @@ static mysql_state_machine_status authsm_handle_second_authenticate_user(
     mysql_async_auth *ctx) {
   DBUG_TRACE;
   MYSQL *mysql = ctx->mysql;
-  DBUG_PRINT("info",
-             ("second authenticate_user returned %s",
-              ctx->res == CR_OK
-                  ? "CR_OK"
-                  : ctx->res == CR_ERROR ? "CR_ERROR"
-                                         : ctx->res == CR_OK_HANDSHAKE_COMPLETE
-                                               ? "CR_OK_HANDSHAKE_COMPLETE"
-                                               : "error"));
+  DBUG_PRINT("info", ("second authenticate_user returned %s",
+                      ctx->res == CR_OK      ? "CR_OK"
+                      : ctx->res == CR_ERROR ? "CR_ERROR"
+                      : ctx->res == CR_OK_HANDSHAKE_COMPLETE
+                          ? "CR_OK_HANDSHAKE_COMPLETE"
+                          : "error"));
   if (ctx->res > CR_OK) {
     if (ctx->res > CR_ERROR)
       set_mysql_error(mysql, ctx->res, unknown_sqlstate);
