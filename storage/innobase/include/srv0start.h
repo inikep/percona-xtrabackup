@@ -152,4 +152,15 @@ extern bool srv_startup_is_before_trx_rollback_phase;
 /** TRUE if a raw partition is in use */
 extern ibool srv_start_raw_disk_in_use;
 
+/** Open the configured number of undo tablespaces.
+@param[in]  create_new_db true if new db being created
+@param[in]  true disables reading the system tablespace (used in XtraBackup),
+            false is passed on recovery.
+@return DB_SUCCESS or error code */
+dberr_t srv_undo_tablespaces_init(bool create_new_db, bool backup_mode);
+
+/** Free the resources occupied by undo::spaces and trx_sys_undo_spaces,
+called once during thread de-initialization. */
+void undo_spaces_deinit();
+
 #endif
