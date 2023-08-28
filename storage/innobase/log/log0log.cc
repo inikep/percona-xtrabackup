@@ -756,7 +756,9 @@ void log_start_background_threads(log_t &log) {
 
   log_background_threads_active_validate(log);
 
+#ifndef XTRABACKUP
   meb::redo_log_archive_init();
+#endif
 }
 
 void log_stop_background_threads(log_t &log) {

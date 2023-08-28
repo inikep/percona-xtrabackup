@@ -250,3 +250,7 @@ IF(HAS_WARN_FLAG)
   ADD_COMPILE_FLAGS(fts/fts0pars.cc
     COMPILE_FLAGS "${HAS_WARN_FLAG}")
 ENDIF()
+
+# Must be after all ADD_DEFINITIONS() to be inherited by the
+# 'xtrabackup' subdirectory
+ADD_SUBDIRECTORY(xtrabackup)
