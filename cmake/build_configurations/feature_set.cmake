@@ -25,6 +25,7 @@ SET(FEATURE_SET "community" CACHE STRING
 )
 
 IF(NOT WITHOUT_SERVER)
+  SET(WITH_EMBEDDED_SERVER ON CACHE BOOL "")
 
   # Set these ON by default. They can be disabled with
   # -DWITHOUT_${eng}_STORAGE_ENGINE
@@ -52,7 +53,7 @@ IF(NOT WITH_SSL)
   SET(WITH_SSL system CACHE STRING "Use system  SSL")
 ENDIF()
 IF(NOT WITH_ZLIB)
-  SET(WITH_ZLIB bundled CACHE STRING "Use bundled zlib")
+  SET(WITH_ZLIB system CACHE STRING "Use bundled zlib")
 ENDIF()
 IF(NOT WITH_ICU)
   SET(WITH_ICU bundled CACHE STRING "Use bundled icu")
