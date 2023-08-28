@@ -100,7 +100,6 @@ volatile bool recv_recovery_on;
 
 #ifdef UNIV_HOTBACKUP
 std::list<std::pair<space_id_t, lsn_t>> index_load_list;
-volatile lsn_t backup_redo_log_flushed_lsn;
 
 extern bool meb_is_space_loaded(const space_id_t space_id);
 
@@ -213,15 +212,6 @@ static bool recv_writer_is_active() {
 /* prototypes */
 
 #ifndef UNIV_HOTBACKUP
-
-/** Reads a specified log segment to a buffer.
-@param[in,out]  log             redo log
-@param[in,out]  buf             buffer where to read
-@param[in]      start_lsn       read area start
-@param[in]      end_lsn         read area end
-@return lsn up to which data was available on disk (ideally end_lsn) */
-static lsn_t recv_read_log_seg(log_t &log, byte *buf, lsn_t start_lsn,
-                               lsn_t end_lsn);
 
 /** Initialize crash recovery environment. Can be called iff
 recv_needed_recovery == false. */
@@ -611,9 +601,9 @@ static void recv_sys_empty_hash() {
 block.
 @param[in]      block   pointer to a log block
 @return whether the checksum matches */
-#ifndef UNIV_HOTBACKUP
+#if !defined(UNIV_HOTBACKUP) && !defined(XTRABACKUP)
 static
-#endif /* !UNIV_HOTBACKUP */
+#endif /* !UNIV_HOTBACKUP && !XTRABACKUP */
     bool
     log_block_checksum_is_ok(const byte *block) {
   return !srv_log_checksums ||
@@ -1608,48 +1598,9 @@ static byte *recv_parse_or_apply_log_rec_body(
       return fil_tablespace_redo_extend(
           ptr, end_ptr, page_id_t(space_id, page_no), parsed_bytes,
           recv_sys->bytes_to_ignore_before_checkpoint != 0);
-#else  /* !UNIV_HOTBACKUP */
-      // Mysqlbackup does not execute file operations. It cares for all
-      // files to be at their final places when it applies the redo log.
-      // The exception is the restore of an incremental_with_redo_log_only
-      // backup.
-    case MLOG_FILE_DELETE:
-
-      return fil_tablespace_redo_delete(
-          ptr, end_ptr, page_id_t(space_id, page_no), parsed_bytes,
-          !recv_sys->apply_file_operations);
-
-    case MLOG_FILE_CREATE:
-
-      return fil_tablespace_redo_create(
-          ptr, end_ptr, page_id_t(space_id, page_no), parsed_bytes,
-          !recv_sys->apply_file_operations);
-
-    case MLOG_FILE_RENAME:
-
-      return fil_tablespace_redo_rename(
-          ptr, end_ptr, page_id_t(space_id, page_no), parsed_bytes,
-          !recv_sys->apply_file_operations);
-
-    case MLOG_FILE_EXTEND:
-
-      return fil_tablespace_redo_extend(
-          ptr, end_ptr, page_id_t(space_id, page_no), parsed_bytes,
-          !recv_sys->apply_file_operations);
 #endif /* !UNIV_HOTBACKUP */
-
     case MLOG_INDEX_LOAD:
-#ifdef UNIV_HOTBACKUP
-      // While scanning redo logs during a backup operation a
-      // MLOG_INDEX_LOAD type redo log record indicates, that a DDL
-      // (create index, alter table...) is performed with
-      // 'algorithm=inplace'. The affected tablespace must be re-copied
-      // in the backup lock phase. Record it in the index_load_list.
-      if (!recv_recovery_on) {
-        index_load_list.emplace_back(
-            std::pair<space_id_t, lsn_t>(space_id, recv_sys->recovered_lsn));
-      }
-#endif /* UNIV_HOTBACKUP */
+
       if (end_ptr < ptr + 8) {
         return nullptr;
       }
@@ -3235,7 +3186,11 @@ static bool recv_multi_rec(byte *ptr, byte *end_ptr) {
 
 /** Parse log records from a buffer and optionally store them to a
 hash table to wait merging to file pages. */
-static void recv_parse_log_recs() {
+#ifndef XTRABACKUP
+static
+#endif
+    void
+    recv_parse_log_recs() {
   ut_ad(recv_sys->parse_start_lsn != 0);
 
   for (;;) {
@@ -3276,9 +3231,11 @@ recv_sys->parse_start_lsn is non-zero.
 @param[in]      log_block               log block
 @param[in]      scanned_lsn             lsn of how far we were able
                                         to find data in this log block
+@param[in]      len                     0 if full block or length of the data
+                                        to add
 @return true if more data added */
-static bool recv_sys_add_to_parsing_buf(const byte *log_block,
-                                        lsn_t scanned_lsn) {
+bool recv_sys_add_to_parsing_buf(const byte *log_block, lsn_t scanned_lsn,
+                                 ulint len) {
   ut_ad(scanned_lsn >= recv_sys->scanned_lsn);
 
   if (!recv_sys->parse_start_lsn) {
@@ -3289,7 +3246,7 @@ static bool recv_sys_add_to_parsing_buf(const byte *log_block,
   }
 
   ulint more_len;
-  ulint data_len = log_block_get_data_len(log_block);
+  ulint data_len = len > 0 ? len : log_block_get_data_len(log_block);
 
   if (recv_sys->parse_start_lsn >= scanned_lsn) {
     return false;
@@ -3337,7 +3294,7 @@ static bool recv_sys_add_to_parsing_buf(const byte *log_block,
 }
 
 /** Moves the parsing buffer data left to the buffer start. */
-static void recv_reset_buffer() {
+void recv_reset_buffer() {
   ut_memmove(recv_sys->buf, recv_sys->buf + recv_sys->recovered_offset,
              recv_sys->len - recv_sys->recovered_offset);
 
@@ -3413,7 +3370,10 @@ bool meb_scan_log_recs(
       break;
     }
 
-    const auto data_len = block_header.m_data_len;
+#ifndef XTRABACKUP
+    const
+#endif
+        auto data_len = block_header.m_data_len;
 
     if (scanned_lsn + data_len > recv_sys->scanned_lsn &&
         recv_sys->scanned_epoch_no > 0 &&
@@ -3525,7 +3485,8 @@ bool meb_scan_log_recs(
       }
 
       if (!recv_sys->found_corrupt_log) {
-        more_data = recv_sys_add_to_parsing_buf(log_block, scanned_lsn);
+        more_data =
+            recv_sys_add_to_parsing_buf(log_block, scanned_lsn, data_len);
       }
 
       recv_sys->scanned_lsn = scanned_lsn;
@@ -3578,8 +3539,12 @@ bool meb_scan_log_recs(
 }
 
 #ifndef UNIV_HOTBACKUP
-static lsn_t recv_read_log_seg(log_t &log, byte *buf, lsn_t start_lsn,
-                               const lsn_t end_lsn) {
+#ifndef XTRABACKUP
+static
+#endif
+    lsn_t
+    recv_read_log_seg(log_t &log, byte *buf, lsn_t start_lsn,
+                      const lsn_t end_lsn) {
   log_background_threads_inactive_validate();
 
   ut_a(start_lsn < end_lsn);

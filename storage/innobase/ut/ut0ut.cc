@@ -475,6 +475,8 @@ const char *ut_strerr(dberr_t num) {
       return ("Sample reader has been requested to stop sampling");
     case DB_OUT_OF_RESOURCES:
       return ("System has run out of resources");
+    case DB_PAGE_IS_BLANK:
+      return ("Page is blank");
     case DB_FTS_TOO_MANY_NESTED_EXP:
       return ("Too many nested sub-expressions in a full-text search");
     case DB_PAGE_IS_STALE:
@@ -500,15 +502,15 @@ namespace ib {
 
 #if !defined(UNIV_HOTBACKUP) && !defined(UNIV_NO_ERR_MSGS)
 
-void logger::log_event(std::string msg) {
+void logger::log_event(std::string msg IF_XB(, const char *const module)) {
   LogEvent()
       .type(LOG_TYPE_ERROR)
       .prio(m_level)
       .errcode(m_err)
-      .subsys("InnoDB")
+      .subsys(module)
       .verbatim(msg.c_str());
 }
-logger::~logger() { log_event(m_oss.str()); }
+logger::~logger() { log_event(m_oss.str() IF_XB(, m_module)); }
 
 /*
 MSVS complains: Warning C4722: destructor never returns, potential memory leak.
@@ -518,7 +520,7 @@ MY_COMPILER_DIAGNOSTIC_PUSH()
 MY_COMPILER_MSVC_DIAGNOSTIC_IGNORE(4722)
 
 fatal::~fatal() {
-  log_event("[FATAL] " + m_oss.str());
+  log_event("[FATAL] " + m_oss.str(), m_module);
   ut_dbg_assertion_failed("ib::fatal triggered", m_location.filename,
                           m_location.line);
 }
@@ -526,8 +528,8 @@ fatal::~fatal() {
 MY_COMPILER_DIAGNOSTIC_POP()
 
 fatal_or_error::~fatal_or_error() {
+  log_event("[FATAL] " + m_oss.str(), m_module);
   if (m_fatal) {
-    log_event("[FATAL] " + m_oss.str());
     ut_dbg_assertion_failed("ib::fatal_or_error triggered", m_location.filename,
                             m_location.line);
   }
