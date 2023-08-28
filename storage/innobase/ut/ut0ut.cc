@@ -475,6 +475,8 @@ const char *ut_strerr(dberr_t num) {
       return ("Sample reader has been requested to stop sampling");
     case DB_OUT_OF_RESOURCES:
       return ("System has run out of resources");
+    case DB_PAGE_IS_BLANK:
+      return ("Page is blank");
     case DB_FTS_TOO_MANY_NESTED_EXP:
       return ("Too many nested sub-expressions in a full-text search");
     case DB_PAGE_IS_STALE:
@@ -501,12 +503,16 @@ namespace ib {
 #if !defined(UNIV_HOTBACKUP) && !defined(UNIV_NO_ERR_MSGS)
 
 void logger::log_event(std::string msg) {
+#if !(defined XTRABACKUP)
   LogEvent()
       .type(LOG_TYPE_ERROR)
       .prio(m_level)
       .errcode(m_err)
       .subsys("InnoDB")
       .verbatim(msg.c_str());
+#else
+  fprintf(stderr, "%s\n", msg.c_str());
+#endif
 }
 logger::~logger() { log_event(m_oss.str()); }
 
@@ -518,7 +524,11 @@ MY_COMPILER_DIAGNOSTIC_PUSH()
 MY_COMPILER_MSVC_DIAGNOSTIC_IGNORE(4722)
 
 fatal::~fatal() {
+#if !(defined XTRABACKUP)
   log_event("[FATAL] " + m_oss.str());
+#else
+  fprintf(stderr, "%s\n", m_oss.str().c_str());
+#endif
   ut_dbg_assertion_failed("ib::fatal triggered", m_location.filename,
                           m_location.line);
 }
