@@ -127,14 +127,14 @@
 #include "../libmysql/init_commands_array.h"
 #include "../libmysql/mysql_trace.h" /* MYSQL_TRACE() instrumentation */
 #include "sql_common.h"
-#ifdef MYSQL_SERVER
+#if defined(MYSQL_SERVER) && !defined(XTRABACKUP)
 #include "mysql_com_server.h"
 #include "sql/client_settings.h"
 #include "sql/server_component/mysql_command_services_imp.h"
 /* mysql_command_service_extn */
 #else
 #include "libmysql/client_settings.h"
-#endif
+#endif /* MYSQL_SERVER && ! XTRABACKUP */
 #include "client_extensions_macros.h"
 #include "sql/log_event.h"     /* Log_event_type */
 #include "sql/rpl_constants.h" /* mysql_binlog_XXX() */
@@ -1892,9 +1892,9 @@ void end_server(MYSQL *mysql) {
     vio_description(mysql->net.vio, desc);
     DBUG_PRINT("info", ("Net: %s", desc));
 #endif  // NDEBUG
-#ifdef MYSQL_SERVER
+#if defined(MYSQL_SERVER) && !defined(XTRABACKUP)
     slave_io_thread_detach_vio();
-#endif
+#endif /* MYSQL_SERVER && ! XTRABACKUP */
     vio_delete(mysql->net.vio);
     mysql->net.vio = nullptr; /* Marker */
     mysql_prune_stmt_list(mysql);
@@ -3230,7 +3230,7 @@ static MYSQL_METHODS client_methods = {
     cli_fetch_lengths,          /* fetch_lengths */
     cli_flush_use_result,       /* flush_use_result */
     cli_read_change_user_result /* read_change_user_result */
-#ifndef MYSQL_SERVER
+#if !defined(MYSQL_SERVER) || defined(XTRABACKUP)
     ,
     cli_list_fields,         /* list_fields */
     cli_read_prepare_result, /* read_prepare_result */
@@ -3241,7 +3241,7 @@ static MYSQL_METHODS client_methods = {
     cli_read_query_result,   /* next_result */
     cli_read_binary_rows,    /* read_rows_from_cursor */
     free_rows
-#endif
+#endif /* ! MYSQL_SERVER || XTRABACKUP */
     ,
     cli_read_query_result_nonblocking,      /* read_query_result_nonblocking */
     cli_advanced_command_nonblocking,       /* advanced_command_nonblocking */
@@ -3347,12 +3347,12 @@ MYSQL_EXTENSION *mysql_extension_init(MYSQL *mysql [[maybe_unused]]) {
       key_memory_MYSQL, sizeof(struct MYSQL_ASYNC), MYF(MY_WME | MY_ZEROFILL)));
   /* set default value */
   ext->mysql_async_context->async_op_status = ASYNC_OP_UNSET;
-#ifdef MYSQL_SERVER
+#if defined(MYSQL_SERVER) && !defined(XTRABACKUP)
   ext->server_extn = nullptr;
   ext->mcs_extn = static_cast<struct mysql_command_service_extn *>(
       my_malloc(key_memory_MYSQL, sizeof(struct mysql_command_service_extn),
                 MYF(MY_WME | MY_ZEROFILL)));
-#endif
+#endif /* MYSQL_SERVER && ! XTRABACKUP */
   DBUG_PRINT("async",
              ("set state=%d", ext->mysql_async_context->async_query_state));
   return ext;
