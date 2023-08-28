@@ -65,7 +65,7 @@
   @return           In-memory length of values of the submitted column.
 */
 
-static size_t column_pack_length(const dd::Column &col_obj) {
+size_t column_pack_length(const dd::Column &col_obj) {
   // Arrays always use JSON as storage
   dd::enum_column_types col_type =
       col_obj.is_array() ? dd::enum_column_types::JSON : col_obj.type();

@@ -387,9 +387,25 @@ bool CheckDefaultCompatibility(const RJ_Document &doc) {
     return true;
   }
 
+  if (doc.HasMember("mysqld_version_id")) {
+#if !defined(XTRABACKUP)
+    RJ_Value &mysqld_version_id = doc["mysqld_version_id"];
+    DBUG_ASSERT(mysqld_version_id.IsUint64());
+    if (mysqld_version_id.GetUint64() > std::uint64_t(MYSQL_VERSION_ID)) {
+      // Cannot deserialize SDIs from newer versions. Required?
+      my_error(ER_IMP_INCOMPATIBLE_MYSQLD_VERSION, MYF(0),
+               mysqld_version_id.GetUint64(), std::uint64_t(MYSQL_VERSION_ID));
+      return true;
+    }
+#endif
+  } else {
+    DBUG_ASSERT(false);
+  }
+
   DBUG_ASSERT(doc.HasMember("dd_version"));
   const RJ_Value &dd_version_val = doc["dd_version"];
   DBUG_ASSERT(dd_version_val.IsUint());
+#if !defined(XTRABACKUP)
   uint dd_version = dd_version_val.GetUint();
   if (dd_version != Dictionary_impl::get_target_dd_version()) {
     // Incompatible change
@@ -397,10 +413,12 @@ bool CheckDefaultCompatibility(const RJ_Document &doc) {
              Dictionary_impl::get_target_dd_version());
     return true;
   }
+#endif
 
   DBUG_ASSERT(doc.HasMember("sdi_version"));
   const RJ_Value &sdi_version_val = doc["sdi_version"];
   DBUG_ASSERT(sdi_version_val.IsUint64());
+#if !defined(XTRABACKUP)
   std::uint64_t sdi_version_ = sdi_version_val.GetUint64();
   if (sdi_version_ != SDI_VERSION) {
     // Incompatible change

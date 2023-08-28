@@ -1898,7 +1898,7 @@ const char *component_urns[] = {"file://component_reference_cache"};
   @retval false success
   @retval true failure
 */
-static bool component_infrastructure_init() {
+bool component_infrastructure_init() {
   if (initialize_minimal_chassis(&srv_registry)) {
     LogErr(ERROR_LEVEL, ER_COMPONENTS_INFRASTRUCTURE_BOOTSTRAP);
     return true;
@@ -1992,7 +1992,7 @@ static bool mysql_component_infrastructure_init() {
   @retval false success
   @retval true failure
 */
-static bool component_infrastructure_deinit() {
+bool component_infrastructure_deinit() {
   persistent_dynamic_loader_deinit();
 
   srv_registry->release(reinterpret_cast<my_h_service>(
@@ -8407,7 +8407,7 @@ struct my_option my_long_options[] = {
 #endif
     {"sporadic-binlog-dump-fail", 0,
      "Option used by mysql-test for debugging and testing of replication.",
-     &opt_sporadic_binlog_dump_fail, &opt_sporadic_binlog_dump_fail, nullptr,
+     &opt_sporadic_binlog_dump_fail, &opt_sporadic_binlog_dump_fail, 0,
      GET_BOOL, NO_ARG, 0, 0, 0, nullptr, 0, nullptr},
     {"ssl", 0,
      "Enable SSL for connection (automatically enabled with other flags).",
