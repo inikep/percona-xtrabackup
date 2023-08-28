@@ -1971,7 +1971,8 @@ const char *component_urns[] = {"file://component_reference_cache"};
   @retval false success
   @retval true failure
 */
-static bool component_infrastructure_init() {
+/* pxb requires it. Cannot bet static as we will use extern */
+bool component_infrastructure_init() {
   bool retval = false;
   if (initialize_minimal_chassis(&srv_registry)) {
     LogErr(ERROR_LEVEL, ER_COMPONENTS_INFRASTRUCTURE_BOOTSTRAP);
@@ -2066,7 +2067,7 @@ static bool mysql_component_infrastructure_init() {
   @retval false success
   @retval true failure
 */
-static bool component_infrastructure_deinit() {
+bool component_infrastructure_deinit() {
   persistent_dynamic_loader_deinit();
   bool retval = false;
 
@@ -8680,7 +8681,7 @@ struct my_option my_long_options[] = {
 #endif
     {"sporadic-binlog-dump-fail", 0,
      "Option used by mysql-test for debugging and testing of replication.",
-     &opt_sporadic_binlog_dump_fail, &opt_sporadic_binlog_dump_fail, nullptr,
+     &opt_sporadic_binlog_dump_fail, &opt_sporadic_binlog_dump_fail, 0,
      GET_BOOL, NO_ARG, 0, 0, 0, nullptr, 0, nullptr},
     {"ssl", OPT_USE_SSL,
      "Enable SSL for connection (automatically enabled with other flags).",
