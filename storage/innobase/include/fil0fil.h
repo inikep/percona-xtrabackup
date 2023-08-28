@@ -1442,6 +1442,18 @@ bool fil_open_files_limit_update(size_t &new_max_open_files);
 /** Initializes the tablespace memory cache. */
 void fil_close();
 
+#ifdef XTRABACKUP
+/** Open a file of a tablespace.
+The caller must own the shard mutex.
+@param[in,out]  file    Tablespace file
+@return false if the file can't be opened, otherwise true */
+bool fil_node_open_file(fil_node_t *file);
+
+/** Closes a file.
+@param[in] node file to close. */
+void fil_node_close_file(fil_node_t *node);
+
+#endif /* XTRABACKUP */
 /** Opens all log files and system tablespace data files.
 They stay open until the database server shutdown. This should be called
 at a server startup after the space objects for the log and the system
@@ -1453,6 +1465,28 @@ void fil_open_system_tablespace_files();
 /** Closes all open files. There must not be any pending i/o's or not flushed
 modifications in the files. */
 void fil_close_all_files();
+
+/** Closes the redo log files. There must not be any pending i/o's or not
+flushed modifications in the files.
+@param[in]      free_all        Whether to free the instances. */
+void fil_close_log_files(bool free_all);
+
+/** Iterate over the tablespaces. */
+class Fil_space_iterator {
+ public:
+  using Function = std::function<dberr_t(fil_space_t *)>;
+
+  /** For each space.
+  @param[in]  f   Callback */
+  template <typename F>
+  static dberr_t for_each_space(F &&f) {
+    return (iterate([=](fil_space_t *sp) { return (f(sp)); }));
+  }
+
+  /** Iterate over the spaces.
+  @param[in,out]  f   Callback */
+  static dberr_t iterate(Function &&f);
+};
 
 /** Iterate over the files in all the tablespaces. */
 class Fil_iterator {
