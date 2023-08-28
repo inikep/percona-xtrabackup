@@ -43,6 +43,7 @@ Data dictionary interface */
 #include "dd/dictionary.h"
 #include "dd/properties.h"
 #include "dd/types/column.h"
+#include "dd/types/column_type_element.h"
 #include "dd/types/foreign_key.h"
 #include "dd/types/foreign_key_element.h"
 #include "dd/types/index.h"
@@ -839,6 +840,21 @@ dberr_t dd_table_check_for_child(dd::cache::Dictionary_client *client,
                                  bool check_charsets,
                                  dict_err_ignore_t ignore_err,
                                  dict_names_t *fk_tables);
+
+/** Instantiate an InnoDB in-memory table metadata (dict_table_t)
+based on a Global DD object.
+@param[in,out]  client    data dictionary client
+@param[in]  space_id  ID of the tablespace where the table residing
+@param[in]  dd_table  Global DD table object
+@param[in]  thd   thread THD
+@param[in]  schema_name  table schema name
+@param[in]  implicit  whether it is file per table tablespace
+@return error code
+@retval 0 on success */
+int dd_table_open_on_dd_obj(dd::cache::Dictionary_client *client,
+                            space_id_t space_id, const dd::Table &dd_table,
+                            dict_table_t *&table, THD *thd,
+                            const dd::String_type *schema_name, bool implicit);
 
 /** Instantiate an InnoDB in-memory table metadata (dict_table_t)
 based on a Global DD object.

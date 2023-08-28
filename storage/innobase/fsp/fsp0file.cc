@@ -46,6 +46,7 @@ this program; if not, write to the Free Software Foundation, Inc.,
 #ifdef UNIV_HOTBACKUP
 #include "my_sys.h"
 #endif /* UNIV_HOTBACKUP */
+#include "xb0xb.h"
 
 /** Initialize the name and flags of this datafile.
 @param[in]	name	tablespace name, will be copied
@@ -598,9 +599,10 @@ dberr_t Datafile::validate_first_page(space_id_t space_id, lsn_t *flush_lsn,
     /* The space_id can be most anything, except -1. */
     error_txt = "A bad Space ID was found";
 
-  } else if (m_space_id != 0 && space_id != m_space_id) {
-  /* Tablespace ID mismatch. The file could be in use
-  by another tablespace. */
+  } else if (m_space_id != 0 && space_id != m_space_id &&
+             space_id != SPACE_UNKNOWN) {
+    /* Tablespace ID mismatch. The file could be in use
+    by another tablespace. */
 
 #ifndef UNIV_HOTBACKUP
     ut_d(ib::info(ER_IB_MSG_398)
@@ -651,7 +653,8 @@ dberr_t Datafile::validate_first_page(space_id_t space_id, lsn_t *flush_lsn,
   /* For encrypted tablespace, check the encryption info in the
   first page can be decrypt by master key, otherwise, this table
   can't be open. And for importing, we skip checking it. */
-  if (FSP_FLAGS_GET_ENCRYPTION(m_flags) && !for_import) {
+  if (FSP_FLAGS_GET_ENCRYPTION(m_flags) && !for_import &&
+      (srv_backup_mode || !use_dumped_tablespace_keys)) {
     m_encryption_key = static_cast<byte *>(ut_zalloc_nokey(ENCRYPTION_KEY_LEN));
     m_encryption_iv = static_cast<byte *>(ut_zalloc_nokey(ENCRYPTION_KEY_LEN));
 #ifdef UNIV_ENCRYPT_DEBUG
@@ -692,6 +695,18 @@ dberr_t Datafile::validate_first_page(space_id_t space_id, lsn_t *flush_lsn,
   m_encryption_op_in_progress =
       fsp_header_encryption_op_type_in_progress(m_first_page, page_size);
 #endif /* UNIV_HOTBACKUP */
+
+  if (FSP_FLAGS_GET_ENCRYPTION(m_flags) && !srv_backup_mode &&
+      use_dumped_tablespace_keys) {
+    const page_size_t page_size(m_flags);
+    ulint offset = fsp_header_get_encryption_offset(page_size);
+    ut_ad(offset != 0);
+    ulint master_key_id =
+        mach_read_from_4(m_first_page + offset + ENCRYPTION_MAGIC_SIZE);
+    if (Encryption::s_master_key_id < master_key_id) {
+      Encryption::s_master_key_id = master_key_id;
+    }
+  }
 
   if (fil_space_read_name_and_filepath(m_space_id, &prev_name,
                                        &prev_filepath)) {

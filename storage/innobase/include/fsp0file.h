@@ -356,7 +356,7 @@ class Datafile {
   else DB_ERROR. */
   dberr_t find_space_id();
 
-#ifdef UNIV_HOTBACKUP
+#if defined(UNIV_HOTBACKUP) || defined(XTRABACKUP)
   /** @return file size in number of pages */
   page_no_t size() const { return (m_size); }
 
@@ -370,7 +370,7 @@ class Datafile {
   /** Set th tablespace flags
   @param[in]	fsp_flags	Tablespace flags */
   void set_flags(uint32_t flags) { m_flags = flags; }
-#endif /* UNIV_HOTBACKUP */
+#endif /* UNIV_HOTBACKUP || XTRABACKUP*/
 
  private:
   /** Free the filepath buffer. */
