@@ -3642,6 +3642,7 @@ dberr_t Fil_shard::iterate_spaces(bool include_log,
   return (DB_SUCCESS);
 }
 
+
 /** Iterate through all persistent tablespace files (FIL_TYPE_TABLESPACE)
 returning the nodes via callback function cbk.
 @param[in]	include_log	Include log files, if true
@@ -4207,8 +4208,8 @@ dberr_t Fil_shard::space_delete(space_id_t space_id, buf_remove_t buf_remove) {
   when we drop the database the remove directory will fail. */
   if (space->purpose != FIL_TYPE_TEMPORARY) {
 #if defined(UNIV_HOTBACKUP) || defined(XTRABACKUP)
-    /* When replaying the operation in MySQL Enterprise
-    Backup, we do not try to write any log record. */
+  /* When replaying the operation in MySQL Enterprise
+  Backup, we do not try to write any log record. */
 #else /* UNIV_HOTBACKUP || XTRABACKUP */
     /* Before deleting the file, write a log record about it, so that
     InnoDB crash recovery will expect the file to be gone.  Skip this

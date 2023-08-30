@@ -83,7 +83,7 @@ char *SysTablespace::parse_file_name(char *ptr, bool filenames_only) {
 
   /* XtraBackup needs only file names on prepare */
   if (filenames_only) {
-    char *p;
+    char* p;
 
     for (p = ptr; *p && *p != ';'; p++) {
       if (*p == OS_PATH_SEPARATOR) {

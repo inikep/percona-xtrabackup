@@ -4685,8 +4685,8 @@ static int init_ssl_communication() {
     LogErr(ERROR_LEVEL, ER_SSL_FIPS_MODE_ERROR, ssl_err_string);
     return 1;
   }
-#endif
   if (SslAcceptorContext::singleton_init(opt_use_ssl)) return 1;
+#endif
 
 #ifndef HAVE_WOLFSSL
 #if OPENSSL_VERSION_NUMBER < 0x10100000L
