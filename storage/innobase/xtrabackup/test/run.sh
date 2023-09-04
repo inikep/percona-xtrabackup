@@ -52,6 +52,7 @@ Usage: $0 [-f] [-g] [-h] [-s suite] [-t test_name] [-d mysql_basedir] [-c build_
 -x options  Extra options to pass to xtrabackup
 -X options  Extra options to pass to mysqld
 -r path     Use specified path as root directory for test workers.
+-R          Run xtrabackup and mysqld under Record and Replay
 -D          Use mysqld-debug for debug test run.
 EOF
 }
@@ -863,7 +864,7 @@ NWORKERS=
 DEBUG_WORKER=""
 MYSQL_DEBUG_MODE=off
 
-while getopts "fgkhD?:t:s:d:c:j:T:x:X:i:r:" options; do
+while getopts "fgkhDR?:t:s:d:c:j:T:x:X:i:r:" options; do
         case $options in
             f ) force="yes";;
             t )
